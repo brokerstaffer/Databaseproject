@@ -153,7 +153,7 @@ export function AgentSearch() {
   const [editOpen, setEditOpen] = useState(false);
   const [allFiltersOpen, setAllFiltersOpen] = useState(false);
   const [mode, setMode] = useState<SearchMode>("agent");
-  const [source, setSource] = useState<DataSource>("courted");
+  const [source, setSource] = useState<DataSource>("all");
   const [colOrder, setColOrder] = useState<string[]>(DEFAULT_COL_ORDER);
   const [hiddenCols, setHiddenCols] = useState<Set<string>>(new Set());
 
@@ -276,7 +276,7 @@ export function AgentSearch() {
             ))}
           </div>
           <div className="inline-flex rounded-lg border border-neutral-300 bg-white p-0.5 text-sm">
-            {([["courted", "Courted"], ["zillow_realtor", "Zillow / Realtor"]] as const).map(([s, lbl]) => (
+            {([["all", "All"], ["courted", "Courted"], ["zillow_realtor", "Zillow / Realtor"]] as const).map(([s, lbl]) => (
               <button
                 key={s}
                 type="button"
@@ -352,12 +352,6 @@ export function AgentSearch() {
             />
           </div>
         </div>
-
-        {source === "zillow_realtor" && (
-          <div className="border-t border-amber-100 bg-amber-50 px-4 py-2 text-xs text-amber-800">
-            Zillow / Realtor is fetched on-demand by location — connect the scraper to populate results here. Courted data is always available.
-          </div>
-        )}
 
         {/* Table */}
         <div className="min-h-0 flex-1 overflow-auto border-t border-neutral-200">
@@ -467,7 +461,7 @@ export function AgentSearch() {
         </div>
       </div>
 
-      <ExportDialog open={exportOpen} onOpenChange={setExportOpen} filters={filters} total={total} selectedIds={Array.from(selected)} />
+      <ExportDialog open={exportOpen} onOpenChange={setExportOpen} filters={filters} total={total} selectedIds={Array.from(selected)} source={source} />
       <EditColumnsModal
         open={editOpen}
         onOpenChange={setEditOpen}

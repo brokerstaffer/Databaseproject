@@ -134,9 +134,11 @@ begin
     return jsonb_build_object('data', v_data, 'totalCount', v_count, 'salesVolumeTotal', v_volume);
   end if;
 
-  -- DATA SOURCE: Courted is the default permanent store; Zillow/Realtor are on-demand.
+  -- DATA SOURCE: 'all' = no filter; 'courted' = stored Courted data; 'zillow_realtor' = on-demand.
   if p_source = 'zillow_realtor' then
     parts := parts || format('sources && %L::text[]', array['zillow', 'realtor']);
+  elsif p_source = 'courted' then
+    parts := parts || format('sources && %L::text[]', array['courted']);
   end if;
 
   -- LOCATION: chosen field across selected location kinds (OR), no include/exclude.

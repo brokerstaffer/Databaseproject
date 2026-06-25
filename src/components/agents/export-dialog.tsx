@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import type { Filters } from "@/types/agent-filters";
+import type { DataSource } from "@/types/agent";
 import { EXPORT_COLUMNS } from "@/lib/export/columns";
 
 interface ClientOpt {
@@ -31,12 +32,14 @@ export function ExportDialog({
   filters,
   total,
   selectedIds,
+  source,
 }: {
   open: boolean;
   onOpenChange: (o: boolean) => void;
   filters: Filters;
   total: number;
   selectedIds: string[];
+  source: DataSource;
 }) {
   const [method, setMethod] = useState<"clay" | "csv">("clay");
   const [clients, setClients] = useState<ClientOpt[]>([]);
@@ -72,6 +75,7 @@ export function ExportDialog({
     selectedIds.length > 0 ? `${selectedIds.length} selected` : from || to ? `rows ${from || 1}–${to || total}` : `all ${total.toLocaleString()}`;
 
   const reqBody = () => ({
+    source,
     filters,
     selectedIds: selectedIds.length ? selectedIds : undefined,
     rangeFrom: from || undefined,
