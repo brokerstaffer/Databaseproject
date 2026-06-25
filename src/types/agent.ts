@@ -41,6 +41,10 @@ export interface Agent {
   active_listings: number | null;
   pending_listings: number | null;
   mls: AgentMls[] | null;
+  source_stats?: { source: string; sales_volume: number | null; units: number | null }[] | null;
+  // office-mode rows (when mode = "office")
+  agent_names?: string[] | null;
+  agent_count?: number | null;
   [key: string]: unknown;
 }
 

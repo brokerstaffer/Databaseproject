@@ -45,7 +45,7 @@ export default function LoginPage() {
         if (type === "invite" || type === "recovery") {
           window.location.href = "/accept-invite";
         } else {
-          window.location.href = "/leads";
+          window.location.href = "/search";
         }
       });
     }
@@ -68,7 +68,7 @@ export default function LoginPage() {
       return;
     }
 
-    window.location.href = "/leads";
+    window.location.href = "/search";
   }
 
   async function handleResetPassword(e: React.FormEvent) {

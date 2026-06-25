@@ -57,7 +57,7 @@ function AcceptInviteForm() {
         .eq("id", user.id);
     }
 
-    router.push("/leads");
+    router.push("/search");
     router.refresh();
   }
 

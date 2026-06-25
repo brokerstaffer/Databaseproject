@@ -43,5 +43,5 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  return NextResponse.redirect(new URL("/leads", origin));
+  return NextResponse.redirect(new URL("/search", origin));
 }

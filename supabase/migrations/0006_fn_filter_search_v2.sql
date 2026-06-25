@@ -67,6 +67,78 @@ declare
   arr text[]; kinds text[]; kind text; col text; field text;
   kconds text[]; side text; c text;
 begin
+  -- =========================================================
+  -- OFFICE MODE: query the offices table (office-level filters), return offices + their agents.
+  -- =========================================================
+  if p_mode = 'office' then
+    f := p_filters->'location';
+    if f is not null and jsonb_array_length(coalesce(f->'values', '[]'::jsonb)) > 0 then
+      field := coalesce(f->>'field', 'city');
+      arr := array(select jsonb_array_elements_text(f->'values'));
+      col := case field when 'state' then 'office_state' else 'office_' || field end;
+      parts := parts || format('%I = ANY(%L::text[])', col, arr);
+    end if;
+
+    f := p_filters->'salesVolume';
+    if f is not null then
+      side := coalesce(f->>'side', 'all');
+      col := case side when 'list' then 'list_side_dollar' when 'buy' then 'buy_side_dollar' else 'sales_volume' end;
+      c := fn_range_cond(col, f); if c is not null then parts := parts || c; end if;
+    end if;
+
+    f := p_filters->'officeSearch';
+    if f is not null then
+      sub := f->'brand';
+      if sub is not null then
+        if jsonb_array_length(coalesce(sub->'include', '[]'::jsonb)) > 0 then
+          parts := parts || format('brand = ANY(%L::text[])', array(select jsonb_array_elements_text(sub->'include')));
+        end if;
+        if jsonb_array_length(coalesce(sub->'exclude', '[]'::jsonb)) > 0 then
+          parts := parts || format('(brand is null or brand <> ALL(%L::text[]))', array(select jsonb_array_elements_text(sub->'exclude')));
+        end if;
+      end if;
+      sub := f->'office';
+      if sub is not null then
+        if jsonb_array_length(coalesce(sub->'include', '[]'::jsonb)) > 0 then
+          parts := parts || format('office_name = ANY(%L::text[])', array(select jsonb_array_elements_text(sub->'include')));
+        end if;
+        if jsonb_array_length(coalesce(sub->'exclude', '[]'::jsonb)) > 0 then
+          parts := parts || format('(office_name is null or office_name <> ALL(%L::text[]))', array(select jsonb_array_elements_text(sub->'exclude')));
+        end if;
+      end if;
+    end if;
+
+    f := p_filters->'closedUnits';
+    if f is not null then c := fn_range_cond('units', f); if c is not null then parts := parts || c; end if; end if;
+
+    if array_length(parts, 1) > 0 then v_where := array_to_string(parts, ' and '); end if;
+
+    v_sort_col := case p_sort_by when 'office_name' then 'office_name' when 'units' then 'units' when 'agent_count' then 'agent_count' else 'sales_volume' end;
+    v_dir := case lower(p_sort_dir) when 'asc' then 'asc' else 'desc' end;
+
+    execute format('select count(*), coalesce(sum(sales_volume), 0) from offices where %s', v_where) into v_count, v_volume;
+
+    execute format($q$
+      select coalesce(jsonb_agg(t), '[]'::jsonb)
+      from (
+        select o.*,
+          (select coalesce(jsonb_agg(ag.full_name order by ag.sv desc nulls last), '[]'::jsonb)
+             from (select full_name, sales_volume sv from agents where office_id = o.id order by sales_volume desc nulls last limit 25) ag) as agent_names
+        from offices o
+        where %s
+        order by %I %s nulls last
+        limit %s offset %s
+      ) t
+    $q$, v_where, v_sort_col, v_dir, p_limit, p_offset) into v_data;
+
+    return jsonb_build_object('data', v_data, 'totalCount', v_count, 'salesVolumeTotal', v_volume);
+  end if;
+
+  -- DATA SOURCE: Courted is the default permanent store; Zillow/Realtor are on-demand.
+  if p_source = 'zillow_realtor' then
+    parts := parts || format('sources && %L::text[]', array['zillow', 'realtor']);
+  end if;
+
   -- LOCATION: chosen field across selected location kinds (OR), no include/exclude.
   f := p_filters->'location';
   if f is not null and jsonb_array_length(coalesce(f->'values', '[]'::jsonb)) > 0 then
@@ -123,6 +195,24 @@ begin
     c := fn_range_cond('approx_gci', f); if c is not null then parts := parts || c; end if;
   end if;
 
+  f := p_filters->'avgSalePrice';
+  if f is not null then
+    c := fn_range_cond('avg_sale_price', f); if c is not null then parts := parts || c; end if;
+  end if;
+
+  -- time-at-office filters: min/max entered in YEARS -> months (buckets already in months).
+  f := p_filters->'estTimeInOffice';
+  if f is not null then
+    f := f || jsonb_build_object('min', (nullif(f->>'min', '')::numeric) * 12, 'max', (nullif(f->>'max', '')::numeric) * 12);
+    c := fn_range_cond('est_time_at_office_months', f); if c is not null then parts := parts || c; end if;
+  end if;
+
+  f := p_filters->'avgTimeAtOffice';
+  if f is not null then
+    f := f || jsonb_build_object('min', (nullif(f->>'min', '')::numeric) * 12, 'max', (nullif(f->>'max', '')::numeric) * 12);
+    c := fn_range_cond('avg_time_at_office_months', f); if c is not null then parts := parts || c; end if;
+  end if;
+
   -- OFFICE SEARCH: brand + office, independent include/exclude (grouped, simultaneous).
   f := p_filters->'officeSearch';
   if f is not null then
@@ -168,6 +258,17 @@ begin
     end if;
   end if;
 
+  -- LICENSE (license number)
+  f := p_filters->'license';
+  if f is not null then
+    if jsonb_array_length(coalesce(f->'include', '[]'::jsonb)) > 0 then
+      parts := parts || format('license_number = ANY(%L::text[])', array(select jsonb_array_elements_text(f->'include')));
+    end if;
+    if jsonb_array_length(coalesce(f->'exclude', '[]'::jsonb)) > 0 then
+      parts := parts || format('(license_number is null or license_number <> ALL(%L::text[]))', array(select jsonb_array_elements_text(f->'exclude')));
+    end if;
+  end if;
+
   if array_length(parts, 1) > 0 then
     v_where := array_to_string(parts, ' and ');
   end if;
@@ -189,7 +290,9 @@ begin
     from (
       select a.*,
         (select jsonb_agg(jsonb_build_object('code', m.code, 'name', m.name, 'member_id', am.mls_member_id))
-           from agent_mls am join mls m on m.id = am.mls_id where am.agent_id = a.id) as mls
+           from agent_mls am join mls m on m.id = am.mls_id where am.agent_id = a.id) as mls,
+        (select jsonb_agg(jsonb_build_object('source', s.source, 'sales_volume', s.sales_volume, 'units', s.units) order by s.source)
+           from agent_source_stats s where s.agent_id = a.id) as source_stats
       from agents a
       where %s
       order by %I %s nulls last

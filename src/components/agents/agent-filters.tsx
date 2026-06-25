@@ -68,7 +68,7 @@ export function FilterPopoverShell({
   );
 }
 
-function SideRadios({ side, onChange }: { side: VolumeSide; onChange: (s: VolumeSide) => void }) {
+export function SideRadios({ side, onChange }: { side: VolumeSide; onChange: (s: VolumeSide) => void }) {
   return (
     <div className="mb-3 flex items-center gap-6">
       {SIDES.map(([val, lbl]) => (
@@ -83,7 +83,7 @@ function SideRadios({ side, onChange }: { side: VolumeSide; onChange: (s: Volume
   );
 }
 
-function BucketPills({ buckets, selected, onToggle }: { buckets: Bucket[]; selected: string[]; onToggle: (k: string) => void }) {
+export function BucketPills({ buckets, selected, onToggle }: { buckets: Bucket[]; selected: string[]; onToggle: (k: string) => void }) {
   return (
     <div className="flex flex-wrap gap-2">
       {buckets.map((b) => {
@@ -106,7 +106,7 @@ function BucketPills({ buckets, selected, onToggle }: { buckets: Bucket[]; selec
   );
 }
 
-function MinMax({
+export function MinMax({
   min,
   max,
   setMin,

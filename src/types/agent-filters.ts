@@ -36,9 +36,13 @@ export interface Filters {
   closedTransactions: RangeSide;
   estTimeInIndustry: RangeF;
   approxGci: RangeF;
+  avgSalePrice: RangeF;
+  estTimeInOffice: RangeF;
+  avgTimeAtOffice: RangeF;
   officeSearch: OfficeSearchFilter;
   mls: IncludeExclude; // mls ids
   title: IncludeExclude;
+  license: IncludeExclude; // license numbers
 }
 
 export const DEFAULT_FILTERS: Filters = {
@@ -48,9 +52,13 @@ export const DEFAULT_FILTERS: Filters = {
   closedTransactions: { side: "all", buckets: [], min: "", max: "" },
   estTimeInIndustry: { buckets: [], min: "", max: "" },
   approxGci: { buckets: [], min: "", max: "" },
+  avgSalePrice: { buckets: [], min: "", max: "" },
+  estTimeInOffice: { buckets: [], min: "", max: "" },
+  avgTimeAtOffice: { buckets: [], min: "", max: "" },
   officeSearch: { brand: { include: [], exclude: [] }, office: { include: [], exclude: [] } },
   mls: { include: [], exclude: [] },
   title: { include: [], exclude: [] },
+  license: { include: [], exclude: [] },
 };
 
 // Bucket sets: { key } is sent to the RPC (must match fn_bucket_cond); { label } is displayed.

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getPool } from "@/lib/db/pool";
 import { upsertAgentRows } from "@/lib/ingest/upsert-agents";
+import { logAudit } from "@/lib/api/log-audit";
 
 export const maxDuration = 300;
 
@@ -10,7 +11,16 @@ export const maxDuration = 300;
 export async function POST(req: NextRequest) {
   const token =
     req.headers.get("x-ingest-token") ?? req.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ?? "";
-  if (!process.env.INGEST_TOKEN || token !== process.env.INGEST_TOKEN) {
+  // Accept the env INGEST_TOKEN or any non-revoked key from the Admin > API Keys tab.
+  let authed = !!process.env.INGEST_TOKEN && token === process.env.INGEST_TOKEN;
+  if (!authed && token) {
+    const { rows } = await getPool().query(
+      "update api_keys set last_used_at = now() where key = $1 and revoked = false returning id",
+      [token]
+    );
+    authed = rows.length > 0;
+  }
+  if (!authed) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
@@ -27,6 +37,7 @@ export async function POST(req: NextRequest) {
   const client = await getPool().connect();
   try {
     const result = await upsertAgentRows(client, rows, source);
+    await logAudit({ action: "ingest", performedBy: "scraper", details: `${source}: received ${rows.length} — ${JSON.stringify(result)}` });
     return NextResponse.json({ ok: true, source, received: rows.length, ...result });
   } catch (e) {
     console.error("ingest error:", e);

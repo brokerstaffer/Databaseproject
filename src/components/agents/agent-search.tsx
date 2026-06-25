@@ -11,13 +11,14 @@ import {
   SlidersHorizontal,
 } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
-import type { Agent, SearchResponse, SortDir } from "@/types/agent";
+import type { Agent, SearchResponse, SortDir, SearchMode, DataSource } from "@/types/agent";
 import { RangePopover, TitlePopover } from "./agent-filters";
-import { LocationPopover, OfficeSearchPopover, MlsPopover } from "./agent-typeahead-filters";
+import { LocationPopover, OfficeSearchPopover, MlsPopover, LicensePopover } from "./agent-typeahead-filters";
 import { ExportDialog } from "./export-dialog";
 import { SavedViews } from "./saved-views";
 import { EditColumnsModal } from "./edit-columns";
-import { DEFAULT_FILTERS, SALES_VOLUME_BUCKETS, COUNT_BUCKETS, YEAR_BUCKETS, GCI_BUCKETS } from "@/types/agent-filters";
+import { AllFiltersDrawer } from "./all-filters-drawer";
+import { DEFAULT_FILTERS, SALES_VOLUME_BUCKETS, COUNT_BUCKETS, YEAR_BUCKETS, GCI_BUCKETS, ieCount, rangeCount, officeSearchCount } from "@/types/agent-filters";
 import type { Filters } from "@/types/agent-filters";
 
 const PAGE_SIZES = [20, 50, 100];
@@ -48,6 +49,24 @@ function PctChange({ n }: { n: number | null | undefined }) {
   if (n == null) return <span className="text-neutral-400">N/A</span>;
   return <span className={n >= 0 ? "text-emerald-600" : "text-red-600"}>{`${n >= 0 ? "+" : ""}${n.toLocaleString()}%`}</span>;
 }
+// Sales volume, with a per-source breakdown when the agent is matched across sources.
+function VolCell({ a }: { a: Agent }) {
+  const stats = a.source_stats ?? [];
+  return (
+    <div>
+      <div>{usd(a.sales_volume)}</div>
+      {stats.length > 1 && (
+        <div className="mt-0.5 space-y-0.5">
+          {stats.map((s) => (
+            <div key={s.source} className="text-[11px] capitalize text-neutral-400">
+              {s.source}: {usd(s.sales_volume)}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 interface Col {
   key: string;
@@ -73,7 +92,7 @@ const COLUMNS: Col[] = [
   { key: "timeOffice", label: "Est. time at office", render: (a) => ym(a.est_time_at_office_months) },
   { key: "avgTimeOffice", label: "Avg. time at office", render: (a) => ym(a.avg_time_at_office_months) },
   { key: "transacted", label: "Most transacted city", render: (a) => (a.most_transacted_city ? `${a.most_transacted_city}${a.transacted_state ? `, ${a.transacted_state}` : ""}` : "N/A") },
-  { key: "vol", label: "Sales volume", sortBy: "sales_volume", align: "right", render: (a) => usd(a.sales_volume) },
+  { key: "vol", label: "Sales volume", sortBy: "sales_volume", align: "right", render: (a) => <VolCell a={a} /> },
   { key: "pct", label: "% Change", align: "right", render: (a) => <PctChange n={a.pct_change} /> },
   { key: "buy$", label: "Buy-side ($)", align: "right", render: (a) => usd(a.buy_side_dollar) },
   { key: "list$", label: "List-side ($)", align: "right", render: (a) => usd(a.list_side_dollar) },
@@ -95,6 +114,30 @@ const COL_META = COLUMNS.map((c) => ({ key: c.key, label: c.label }));
 const LOCKED_COLS = ["agent", "office"];
 const COLS_STORAGE = "bs_agent_cols";
 
+// Office-mode columns (offices table + the office's agents).
+const OFFICE_COLUMNS: Col[] = [
+  { key: "office", label: "Office", sortBy: "office_name", render: (o) => <span className="font-semibold text-neutral-900">{na(o.office_name)}</span> },
+  { key: "brand", label: "Brand", render: (o) => na(o.brand) },
+  { key: "officeCity", label: "Office city", render: (o) => (o.office_city ? `${o.office_city}${o.office_state ? `, ${o.office_state}` : ""}` : "N/A") },
+  { key: "officeZip", label: "Office zip", render: (o) => na(o.office_zip) },
+  { key: "vol", label: "Sales volume", sortBy: "sales_volume", align: "right", render: (o) => usd(o.sales_volume) },
+  { key: "list$", label: "List-side ($)", align: "right", render: (o) => usd(o.list_side_dollar) },
+  { key: "buy$", label: "Buy-side ($)", align: "right", render: (o) => usd(o.buy_side_dollar) },
+  { key: "units", label: "Units", sortBy: "units", align: "right", render: (o) => numv(o.units) },
+  { key: "agentCount", label: "Agents", sortBy: "agent_count", align: "right", render: (o) => numv(o.agent_count) },
+  {
+    key: "agents",
+    label: "Agents at office",
+    render: (o) => {
+      const names = o.agent_names ?? [];
+      if (names.length === 0) return <span className="text-neutral-400">N/A</span>;
+      const shown = names.slice(0, 4).join(", ");
+      const extra = names.length > 4 ? ` +${names.length - 4}` : "";
+      return <span className="text-neutral-600">{shown}{extra}</span>;
+    },
+  },
+];
+
 export function AgentSearch() {
   const [rows, setRows] = useState<Agent[]>([]);
   const [total, setTotal] = useState(0);
@@ -108,6 +151,9 @@ export function AgentSearch() {
   const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
   const [exportOpen, setExportOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
+  const [allFiltersOpen, setAllFiltersOpen] = useState(false);
+  const [mode, setMode] = useState<SearchMode>("agent");
+  const [source, setSource] = useState<DataSource>("courted");
   const [colOrder, setColOrder] = useState<string[]>(DEFAULT_COL_ORDER);
   const [hiddenCols, setHiddenCols] = useState<Set<string>>(new Set());
 
@@ -137,6 +183,22 @@ export function AgentSearch() {
   }
 
   const visibleColumns = colOrder.map((k) => COL_BY_KEY[k]).filter((c): c is Col => !!c && !hiddenCols.has(c.key));
+  const activeColumns = mode === "office" ? OFFICE_COLUMNS : visibleColumns;
+
+  const activeFilterCount =
+    filters.location.values.length +
+    rangeCount(filters.salesVolume) +
+    officeSearchCount(filters.officeSearch) +
+    filters.mls.include.length +
+    ieCount(filters.title) +
+    ieCount(filters.license) +
+    rangeCount(filters.closedUnits) +
+    rangeCount(filters.closedTransactions) +
+    rangeCount(filters.estTimeInIndustry) +
+    rangeCount(filters.approxGci) +
+    rangeCount(filters.avgSalePrice) +
+    rangeCount(filters.estTimeInOffice) +
+    rangeCount(filters.avgTimeAtOffice);
 
   function setF<K extends keyof Filters>(k: K, v: Filters[K]) {
     setFilters((p) => ({ ...p, [k]: v }));
@@ -149,7 +211,7 @@ export function AgentSearch() {
       const res = await fetch("/api/search/filter", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode: "agent", source: "courted", sortBy, sortDir, page, pageSize, filters }),
+        body: JSON.stringify({ mode, source, sortBy, sortDir, page, pageSize, filters }),
       });
       const json: SearchResponse = await res.json();
       setRows(json.data ?? []);
@@ -158,7 +220,7 @@ export function AgentSearch() {
     } finally {
       setLoading(false);
     }
-  }, [sortBy, sortDir, page, pageSize, filters]);
+  }, [mode, source, sortBy, sortDir, page, pageSize, filters]);
 
   useEffect(() => {
     fetchData();
@@ -195,23 +257,64 @@ export function AgentSearch() {
     <div className="flex h-full flex-col gap-4">
       {/* Title + filters */}
       <div className="flex items-start justify-between gap-4">
-        <h1 className="shrink-0 text-2xl font-bold tracking-tight text-neutral-900">Agent Search</h1>
+        <div className="flex shrink-0 items-center gap-3">
+          <h1 className="text-2xl font-bold tracking-tight text-neutral-900">{mode === "office" ? "Office Search" : "Agent Search"}</h1>
+          <div className="inline-flex rounded-lg border border-neutral-300 bg-white p-0.5 text-sm">
+            {(["agent", "office"] as const).map((m) => (
+              <button
+                key={m}
+                type="button"
+                onClick={() => {
+                  setMode(m);
+                  setPage(1);
+                  setSelected(new Set());
+                }}
+                className={`rounded-md px-3 py-1 font-medium transition-colors ${mode === m ? "bg-neutral-900 text-white" : "text-neutral-600 hover:text-neutral-900"}`}
+              >
+                {m === "agent" ? "Agent" : "Office"}
+              </button>
+            ))}
+          </div>
+          <div className="inline-flex rounded-lg border border-neutral-300 bg-white p-0.5 text-sm">
+            {([["courted", "Courted"], ["zillow_realtor", "Zillow / Realtor"]] as const).map(([s, lbl]) => (
+              <button
+                key={s}
+                type="button"
+                onClick={() => {
+                  setSource(s);
+                  setPage(1);
+                  setSelected(new Set());
+                }}
+                className={`rounded-md px-3 py-1 font-medium transition-colors ${source === s ? "bg-neutral-900 text-white" : "text-neutral-600 hover:text-neutral-900"}`}
+              >
+                {lbl}
+              </button>
+            ))}
+          </div>
+        </div>
         <div className="flex flex-wrap items-center justify-end gap-1.5">
           <LocationPopover value={filters.location} onChange={(v) => setF("location", v)} />
           <RangePopover label="Sales volume" hasSide prefix="$" buckets={SALES_VOLUME_BUCKETS} value={filters.salesVolume} onChange={(v) => setF("salesVolume", v)} />
           <OfficeSearchPopover value={filters.officeSearch} onChange={(v) => setF("officeSearch", v)} />
           <MlsPopover value={filters.mls} onChange={(v) => setF("mls", v)} />
           <TitlePopover value={filters.title} onChange={(v) => setF("title", v)} />
+          <LicensePopover value={filters.license} onChange={(v) => setF("license", v)} />
           <RangePopover label="Closed units" hasSide prefix="#" buckets={COUNT_BUCKETS} value={filters.closedUnits} onChange={(v) => setF("closedUnits", v)} />
           <RangePopover label="Closed transactions" hasSide prefix="#" buckets={COUNT_BUCKETS} value={filters.closedTransactions} onChange={(v) => setF("closedTransactions", v)} />
           <RangePopover label="Est. time in industry" suffix="yrs" buckets={YEAR_BUCKETS} value={{ side: "all", ...filters.estTimeInIndustry }} onChange={(v) => setF("estTimeInIndustry", { buckets: v.buckets, min: v.min, max: v.max })} />
           <RangePopover label="Approx. GCI" prefix="$" buckets={GCI_BUCKETS} value={{ side: "all", ...filters.approxGci }} onChange={(v) => setF("approxGci", { buckets: v.buckets, min: v.min, max: v.max })} />
           <button
             type="button"
+            onClick={() => setAllFiltersOpen(true)}
             className="inline-flex items-center gap-2 rounded-lg border border-neutral-300 bg-white px-3.5 py-2 text-sm font-medium text-neutral-700 hover:bg-neutral-50"
           >
             <SlidersHorizontal className="h-4 w-4" />
             All filters
+            {activeFilterCount > 0 && (
+              <span className="ml-0.5 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-neutral-900 px-1.5 text-xs font-medium text-white">
+                {activeFilterCount}
+              </span>
+            )}
           </button>
         </div>
       </div>
@@ -226,7 +329,7 @@ export function AgentSearch() {
             ) : (
               <>
                 <span className="font-semibold text-neutral-900">{total.toLocaleString()}</span>
-                <span className="text-neutral-500"> Agents found</span>
+                <span className="text-neutral-500">{mode === "office" ? " Offices found" : " Agents found"}</span>
                 <span className="px-2 text-neutral-300">•</span>
                 <span className="font-semibold text-neutral-900">{usdShort(vol)}</span>
                 <span className="text-neutral-500"> Sales volume</span>
@@ -250,6 +353,12 @@ export function AgentSearch() {
           </div>
         </div>
 
+        {source === "zillow_realtor" && (
+          <div className="border-t border-amber-100 bg-amber-50 px-4 py-2 text-xs text-amber-800">
+            Zillow / Realtor is fetched on-demand by location — connect the scraper to populate results here. Courted data is always available.
+          </div>
+        )}
+
         {/* Table */}
         <div className="min-h-0 flex-1 overflow-auto border-t border-neutral-200">
           <table className="w-full border-collapse text-sm">
@@ -258,7 +367,7 @@ export function AgentSearch() {
                 <th className="w-10 px-4 py-2.5 text-left">
                   <Checkbox checked={allChecked} onCheckedChange={toggleAll} aria-label="Select all" />
                 </th>
-                {visibleColumns.map((col) => {
+                {activeColumns.map((col) => {
                   const active = sortBy === col.sortBy;
                   return (
                     <th
@@ -289,13 +398,13 @@ export function AgentSearch() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={visibleColumns.length + 1} className="py-16 text-center text-sm text-neutral-400">
+                  <td colSpan={activeColumns.length + 1} className="py-16 text-center text-sm text-neutral-400">
                     Loading…
                   </td>
                 </tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={visibleColumns.length + 1} className="py-16 text-center text-sm text-neutral-400">
+                  <td colSpan={activeColumns.length + 1} className="py-16 text-center text-sm text-neutral-400">
                     No agents found.
                   </td>
                 </tr>
@@ -305,7 +414,7 @@ export function AgentSearch() {
                     <td className="w-10 px-4 py-3">
                       <Checkbox checked={selected.has(a.id)} onCheckedChange={() => toggleOne(a.id)} aria-label="Select row" />
                     </td>
-                    {visibleColumns.map((col) => (
+                    {activeColumns.map((col) => (
                       <td
                         key={col.key}
                         className={`whitespace-nowrap px-4 py-3 text-neutral-700 ${col.align === "right" ? "text-right tabular-nums" : "text-left"}`}
@@ -368,6 +477,15 @@ export function AgentSearch() {
         hidden={[...hiddenCols]}
         defaultOrder={DEFAULT_COL_ORDER}
         onSave={applyCols}
+      />
+      <AllFiltersDrawer
+        open={allFiltersOpen}
+        onOpenChange={setAllFiltersOpen}
+        filters={filters}
+        onApply={(f) => {
+          setFilters(f);
+          setPage(1);
+        }}
       />
     </div>
   );

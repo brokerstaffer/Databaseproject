@@ -3,10 +3,13 @@
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import type { Filters } from "@/types/agent-filters";
+import { EXPORT_COLUMNS } from "@/lib/export/columns";
 
 interface ClientOpt {
   id: string;
@@ -19,6 +22,8 @@ interface Campaign {
   name: string | null;
   status: string | null;
 }
+
+const ALL_KEYS = EXPORT_COLUMNS.map((c) => c.key);
 
 export function ExportDialog({
   open,
@@ -33,13 +38,15 @@ export function ExportDialog({
   total: number;
   selectedIds: string[];
 }) {
+  const [method, setMethod] = useState<"clay" | "csv">("clay");
   const [clients, setClients] = useState<ClientOpt[]>([]);
   const [clientId, setClientId] = useState("");
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [campaignId, setCampaignId] = useState("");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
-  const [sending, setSending] = useState(false);
+  const [cols, setCols] = useState<Set<string>>(new Set(ALL_KEYS));
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     if (open) {
@@ -64,27 +71,38 @@ export function ExportDialog({
   const scope =
     selectedIds.length > 0 ? `${selectedIds.length} selected` : from || to ? `rows ${from || 1}–${to || total}` : `all ${total.toLocaleString()}`;
 
-  async function send() {
+  const reqBody = () => ({
+    filters,
+    selectedIds: selectedIds.length ? selectedIds : undefined,
+    rangeFrom: from || undefined,
+    rangeTo: to || undefined,
+    columns: [...cols],
+  });
+  const toggleCol = (k: string) =>
+    setCols((s) => {
+      const n = new Set(s);
+      if (n.has(k)) n.delete(k);
+      else n.add(k);
+      return n;
+    });
+
+  async function sendClay() {
     if (!clientId) {
       toast.error("Select a client");
       return;
     }
-    setSending(true);
+    if (cols.size === 0) {
+      toast.error("Select at least one column");
+      return;
+    }
+    setBusy(true);
     const campaign = campaigns.find((c) => c.id === campaignId);
     const res = await fetch("/api/integrations/clay/send", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        clientId,
-        campaignId: campaign?.bison_campaign_id ?? null,
-        campaignName: campaign?.name ?? null,
-        filters,
-        selectedIds: selectedIds.length ? selectedIds : undefined,
-        rangeFrom: from || undefined,
-        rangeTo: to || undefined,
-      }),
+      body: JSON.stringify({ ...reqBody(), clientId, campaignId: campaign?.bison_campaign_id ?? null, campaignName: campaign?.name ?? null }),
     });
-    setSending(false);
+    setBusy(false);
     const j = await res.json().catch(() => ({}));
     if (res.ok) {
       toast.success(`Sent ${j.sent} agents to ${j.client}'s Clay`);
@@ -94,47 +112,126 @@ export function ExportDialog({
     }
   }
 
+  async function downloadCsv() {
+    if (cols.size === 0) {
+      toast.error("Select at least one column");
+      return;
+    }
+    setBusy(true);
+    try {
+      const res = await fetch("/api/export/csv", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(reqBody()) });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        toast.error(j.error ?? "CSV export failed");
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "broker-staffer-agents.csv";
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success("CSV downloaded");
+      onOpenChange(false);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>Export — Send to Clay</DialogTitle>
+          <DialogTitle>Export agents</DialogTitle>
         </DialogHeader>
         <div className="space-y-4">
+          {/* method */}
           <div>
-            <label className="text-sm font-medium text-neutral-700">Client</label>
-            <Select value={clientId} onValueChange={setClientId}>
-              <SelectTrigger className="mt-1">
-                <SelectValue placeholder="Select a client" />
-              </SelectTrigger>
-              <SelectContent>
-                {clients.map((c) => (
-                  <SelectItem key={c.id} value={c.id}>
-                    {c.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {selectedClient && !selectedClient.clay_webhook_url && (
-              <p className="mt-1 text-xs text-red-600">This client has no Clay webhook — add one on the Webhooks page.</p>
-            )}
-            {clients.length === 0 && <p className="mt-1 text-xs text-neutral-500">No clients yet — add one on the Webhooks page.</p>}
+            <label className="text-sm font-medium text-neutral-700">Method</label>
+            <div className="mt-1.5 grid grid-cols-2 gap-2">
+              {([["clay", "Send to Clay"], ["csv", "Download CSV"]] as const).map(([m, lbl]) => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => setMethod(m)}
+                  className={cn(
+                    "rounded-lg border px-3 py-2 text-sm font-medium transition-colors",
+                    method === m ? "border-neutral-900 bg-neutral-900 text-white" : "border-neutral-300 text-neutral-700 hover:bg-neutral-50"
+                  )}
+                >
+                  {lbl}
+                </button>
+              ))}
+            </div>
           </div>
+
+          {/* clay options */}
+          {method === "clay" && (
+            <>
+              <div>
+                <label className="text-sm font-medium text-neutral-700">Client</label>
+                <Select value={clientId} onValueChange={setClientId}>
+                  <SelectTrigger className="mt-1">
+                    <SelectValue placeholder="Select a client" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {clients.map((c) => (
+                      <SelectItem key={c.id} value={c.id}>
+                        {c.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {selectedClient && !selectedClient.clay_webhook_url && (
+                  <p className="mt-1 text-xs text-red-600">This client has no Clay webhook — add one on the Webhooks page.</p>
+                )}
+                {clients.length === 0 && <p className="mt-1 text-xs text-neutral-500">No clients yet — add one on the Webhooks page.</p>}
+              </div>
+              <div>
+                <label className="text-sm font-medium text-neutral-700">EmailBison campaign</label>
+                <Select value={campaignId} onValueChange={setCampaignId} disabled={!clientId || campaigns.length === 0}>
+                  <SelectTrigger className="mt-1">
+                    <SelectValue placeholder={campaigns.length ? "Select a campaign" : "No campaigns synced yet"} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {campaigns.map((c) => (
+                      <SelectItem key={c.id} value={c.id}>
+                        {c.name ?? c.bison_campaign_id}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </>
+          )}
+
+          {/* columns */}
           <div>
-            <label className="text-sm font-medium text-neutral-700">EmailBison campaign</label>
-            <Select value={campaignId} onValueChange={setCampaignId} disabled={!clientId || campaigns.length === 0}>
-              <SelectTrigger className="mt-1">
-                <SelectValue placeholder={campaigns.length ? "Select a campaign" : "No campaigns synced yet"} />
-              </SelectTrigger>
-              <SelectContent>
-                {campaigns.map((c) => (
-                  <SelectItem key={c.id} value={c.id}>
-                    {c.name ?? c.bison_campaign_id}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <div className="flex items-center justify-between">
+              <label className="text-sm font-medium text-neutral-700">
+                Columns <span className="font-normal text-neutral-400">({cols.size}/{ALL_KEYS.length})</span>
+              </label>
+              <div className="flex gap-3 text-xs">
+                <button type="button" className="text-neutral-600 hover:underline" onClick={() => setCols(new Set(ALL_KEYS))}>
+                  Select all
+                </button>
+                <button type="button" className="text-neutral-600 hover:underline" onClick={() => setCols(new Set())}>
+                  Clear
+                </button>
+              </div>
+            </div>
+            <div className="mt-1.5 grid max-h-48 grid-cols-2 gap-x-4 gap-y-1.5 overflow-auto rounded-lg border border-neutral-200 p-3">
+              {EXPORT_COLUMNS.map((c) => (
+                <label key={c.key} className="flex items-center gap-2 text-sm text-neutral-800">
+                  <Checkbox checked={cols.has(c.key)} onCheckedChange={() => toggleCol(c.key)} />
+                  <span className="truncate">{c.label}</span>
+                </label>
+              ))}
+            </div>
           </div>
+
+          {/* range */}
           <div>
             <label className="text-sm font-medium text-neutral-700">
               Range <span className="font-normal text-neutral-400">(blank = all filtered)</span>
@@ -145,17 +242,24 @@ export function ExportDialog({
               <Input value={to} onChange={(e) => setTo(e.target.value)} placeholder="To" inputMode="numeric" />
             </div>
           </div>
+
           <p className="text-xs text-neutral-500">
-            Sending: <span className="font-medium text-neutral-700">{scope}</span> agents
+            Exporting: <span className="font-medium text-neutral-700">{scope}</span> agents · {cols.size} columns
           </p>
         </div>
         <DialogFooter>
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button onClick={send} disabled={sending || !clientId}>
-            {sending ? "Sending…" : "Send to Clay"}
-          </Button>
+          {method === "clay" ? (
+            <Button onClick={sendClay} disabled={busy || !clientId}>
+              {busy ? "Sending…" : "Send to Clay"}
+            </Button>
+          ) : (
+            <Button onClick={downloadCsv} disabled={busy}>
+              {busy ? "Preparing…" : "Download CSV"}
+            </Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

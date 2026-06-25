@@ -9,7 +9,7 @@ import { FilterPopoverShell } from "./agent-filters";
 import type { IncludeExclude, LocationField, LocationFilter, LocationKind, OfficeSearchFilter } from "@/types/agent-filters";
 
 // ---------- helpers ----------
-function useTypeahead(type: string, field?: string) {
+export function useTypeahead(type: string, field?: string) {
   const [query, setQuery] = useState("");
   const [options, setOptions] = useState<string[]>([]);
   useEffect(() => {
@@ -33,7 +33,7 @@ function useTypeahead(type: string, field?: string) {
   return { query, setQuery, options };
 }
 
-function RadioOpt({ label, on, onClick }: { label: string; on: boolean; onClick: () => void }) {
+export function RadioOpt({ label, on, onClick }: { label: string; on: boolean; onClick: () => void }) {
   return (
     <button type="button" onClick={onClick} className="flex items-center gap-2 text-sm text-neutral-800">
       <span className={cn("flex h-4 w-4 items-center justify-center rounded-full border", on ? "border-neutral-900" : "border-neutral-300")}>
@@ -44,7 +44,7 @@ function RadioOpt({ label, on, onClick }: { label: string; on: boolean; onClick:
   );
 }
 
-function Chips({ items, onRemove, tone = "default" }: { items: string[]; onRemove: (v: string) => void; tone?: "default" | "exclude" }) {
+export function Chips({ items, onRemove, tone = "default" }: { items: string[]; onRemove: (v: string) => void; tone?: "default" | "exclude" }) {
   if (items.length === 0) return null;
   return (
     <div className="mt-2 flex flex-wrap gap-1.5">
@@ -63,7 +63,7 @@ function Chips({ items, onRemove, tone = "default" }: { items: string[]; onRemov
   );
 }
 
-function SearchBox({
+export function SearchBox({
   placeholder,
   query,
   setQuery,
@@ -110,13 +110,13 @@ function SearchBox({
 }
 
 // ---------- Location ----------
-const LOCATION_FIELDS: [LocationField, string][] = [
+export const LOCATION_FIELDS: [LocationField, string][] = [
   ["city", "City"],
   ["zip", "Zip code"],
   ["county", "County"],
   ["state", "State"],
 ];
-const LOCATION_KINDS: [LocationKind, string][] = [
+export const LOCATION_KINDS: [LocationKind, string][] = [
   ["office", "Office location"],
   ["transacted", "Most transacted location"],
   ["home", "Home location"],
@@ -409,6 +409,65 @@ export function MlsPopover({ value, onChange }: { value: IncludeExclude; onChang
           Current clients using this MLS: {clients.join(", ")}
         </div>
       )}
+    </FilterPopoverShell>
+  );
+}
+
+// ---------- License (typeahead include/exclude on license number) ----------
+export function LicensePopover({ value, onChange }: { value: IncludeExclude; onChange: (v: IncludeExclude) => void }) {
+  const [open, setOpen] = useState(false);
+  const [mode, setMode] = useState<"include" | "exclude">("include");
+  const [inc, setInc] = useState<string[]>(value.include);
+  const [exc, setExc] = useState<string[]>(value.exclude);
+  const { query, setQuery, options } = useTypeahead("license");
+
+  useEffect(() => {
+    if (open) {
+      setInc(value.include);
+      setExc(value.exclude);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  const count = value.include.length + value.exclude.length;
+  const taken = [...inc, ...exc];
+  const pick = (v: string) => {
+    if (mode === "include") {
+      setInc((a) => (a.includes(v) ? a : [...a, v]));
+      setExc((a) => a.filter((x) => x !== v));
+    } else {
+      setExc((a) => (a.includes(v) ? a : [...a, v]));
+      setInc((a) => a.filter((x) => x !== v));
+    }
+    setQuery("");
+  };
+
+  return (
+    <FilterPopoverShell
+      label="License"
+      count={count}
+      open={open}
+      onOpenChange={setOpen}
+      width="w-[420px]"
+      onClear={() => {
+        setInc([]);
+        setExc([]);
+        setQuery("");
+      }}
+      onApply={() => {
+        onChange({ include: inc, exclude: exc });
+        setOpen(false);
+      }}
+    >
+      <div className="flex items-center gap-6">
+        <RadioOpt label="Include" on={mode === "include"} onClick={() => setMode("include")} />
+        <RadioOpt label="Exclude" on={mode === "exclude"} onClick={() => setMode("exclude")} />
+      </div>
+      <div className="mt-2">
+        <SearchBox placeholder="Search license #" query={query} setQuery={setQuery} options={options.filter((o) => !taken.includes(o))} onPick={pick} />
+      </div>
+      <Chips items={inc} onRemove={(v) => setInc(inc.filter((x) => x !== v))} />
+      <Chips items={exc} tone="exclude" onRemove={(v) => setExc(exc.filter((x) => x !== v))} />
     </FilterPopoverShell>
   );
 }

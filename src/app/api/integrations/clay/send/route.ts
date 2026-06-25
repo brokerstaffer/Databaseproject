@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getPool } from "@/lib/db/pool";
+import { logAudit } from "@/lib/api/log-audit";
+import { orderedKeys, buildLabeledRow } from "@/lib/export/columns";
 
 export const maxDuration = 300;
 
@@ -15,8 +17,9 @@ export async function POST(req: NextRequest) {
   if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   const body = await req.json().catch(() => ({}));
-  const { clientId, campaignId = null, campaignName = null, mode = "agent", source = "courted", filters = {}, selectedIds, rangeFrom, rangeTo } = body ?? {};
+  const { clientId, campaignId = null, campaignName = null, mode = "agent", source = "courted", filters = {}, selectedIds, rangeFrom, rangeTo, columns } = body ?? {};
   if (!clientId) return NextResponse.json({ error: "clientId required" }, { status: 400 });
+  const keys = orderedKeys(columns);
 
   const { data: client } = await supabase.from("clients").select("name, clay_webhook_url").eq("id", clientId).single();
   if (!client?.clay_webhook_url) return NextResponse.json({ error: "This client has no Clay webhook configured." }, { status: 400 });
@@ -24,7 +27,12 @@ export async function POST(req: NextRequest) {
   // ---- gather rows (bypasses RLS via SECURITY DEFINER RPC / pg pool) ----
   let rows: Record<string, unknown>[] = [];
   if (Array.isArray(selectedIds) && selectedIds.length > 0) {
-    const { rows: r } = await getPool().query("select * from agents where id = any($1::uuid[]) order by sales_volume desc nulls last", [selectedIds]);
+    const { rows: r } = await getPool().query(
+      `select a.*, (select jsonb_agg(jsonb_build_object('code', m.code, 'member_id', am.mls_member_id))
+         from agent_mls am join mls m on m.id = am.mls_id where am.agent_id = a.id) as mls
+       from agents a where a.id = any($1::uuid[]) order by a.sales_volume desc nulls last`,
+      [selectedIds]
+    );
     rows = r;
   } else {
     const from = Number(rangeFrom) > 0 ? Number(rangeFrom) : 1;
@@ -61,7 +69,7 @@ export async function POST(req: NextRequest) {
         campaign_name: campaignName,
         batch_index: Math.floor(i / BATCH),
         count: batch.length,
-        agents: batch,
+        agents: batch.map((r) => buildLabeledRow(r as Record<string, unknown>, keys)),
       }),
     });
     if (!res.ok) {
@@ -70,5 +78,10 @@ export async function POST(req: NextRequest) {
     sent += batch.length;
   }
 
+  await logAudit({
+    action: "clay_send",
+    performedBy: user.email ?? null,
+    details: `Sent ${sent} agents to ${client.name}'s Clay${campaignName ? ` (campaign: ${campaignName})` : ""}`,
+  });
   return NextResponse.json({ ok: true, sent, client: client.name });
 }

@@ -37,7 +37,7 @@ export default function SetPasswordPage() {
       return;
     }
 
-    window.location.href = "/leads";
+    window.location.href = "/search";
   }
 
   return (

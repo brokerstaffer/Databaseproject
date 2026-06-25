@@ -48,6 +48,11 @@ begin
   elsif p_type = 'title' then
     select coalesce(jsonb_agg(distinct title), '[]'::jsonb) into res from agents where title is not null;
     return res;
+
+  elsif p_type = 'license' then
+    execute format($f$select coalesce(jsonb_agg(v order by v), '[]'::jsonb)
+      from (select distinct license_number v from agents where license_number is not null and license_number ilike %L order by 1 limit 50) s$f$, q || '%') into res;
+    return res;
   end if;
 
   return '[]'::jsonb;
