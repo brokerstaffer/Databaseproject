@@ -50,7 +50,15 @@ function DataWebhookTab() {
   const sample = `{
   "source": "courted",
   "rows": [
-    { "Full Name": "Jane Doe", "State License": "12345", "Office Name": "...", "Sales Volume": "1250000" }
+    {
+      "Name": "Jane Doe",
+      "State License": "12345",
+      "Office": "Acme Realty",
+      "Email": "jane@acme.com",
+      "Home City": "Austin", "Home State": "TX",
+      "LTM Sales Volume": "1250000",
+      "LTM Closed Units": "8"
+    }
   ]
 }`;
   return (

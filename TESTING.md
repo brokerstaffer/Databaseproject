@@ -1,75 +1,71 @@
 # Broker Staffer — Testing Checklist
 
-App: **http://localhost:3001** (dev). Sign in with the Supabase Auth user you created.
-Data: 20 Courted (NABOR / Naples) agents seeded.
+App (live): **https://web-production-34f4a.up.railway.app**
+Data: ~20 Courted sample agents + 13 offices + 1 MLS (full load pending the scraper handoff).
 
-Legend: `[ ]` to test · `[x]` verified · `[blocked]` needs config/data
+Legend: `[x]` verified · `[ ]` needs a manual/logged-in pass · `[blocked]` needs real data/integration
 
 ---
 
-## Access & shell
-- [ ] Login works; lands on **Agent Search** (`/search`)
-- [ ] Dark top bar: logo, "Search Broker Staffer", clipboard, bell, avatar
-- [ ] Avatar menu → **Sign out** works
-- [ ] Left nav: Agent Search · Import · Export · Webhooks (active state highlights)
+## ✅ Automated tests run (passing)
 
-## Agent Search — table
-- [ ] Shows "20 Agents found • $3.0B Sales volume"
-- [ ] 28 columns render (Agent → Preferred phone number)
-- [ ] `% Change` green (+) / red (−); money right-aligned; tenure as "yrs/mos"; blanks "N/A"/"None"
-- [ ] Column sort (Agent, Sales volume, Units, Avg sale price, Closed transactions, Est. time)
-- [ ] Pagination: Items per page 20/50/100; "out of N"
-- [ ] Row checkboxes select; select-all
+These were exercised directly against the **live** deployment + database.
 
-## Filters (each: open → set → Apply → counts + rows update)
-- [ ] **Location** — pick City/Zip/County/State; type (e.g. "Naples") → suggestion; add chip; toggle Office/Most-transacted/Home
-- [ ] **Sales volume** — All/List/Buy + range pills ($0–5M…$100M+) + Min/Max
-- [ ] **Office Search** — Brand/Office switch + Include/Exclude; add brand AND office exclusions together (grouped)
-- [ ] **MLS** — search list, check NABOR; "Current clients using this MLS" banner [blocked: needs client/list data]
-- [ ] **Title** — Include/Exclude Salesperson / Team Leader / Managing Broker
-- [ ] **Closed units** / **Closed transactions** — All/List/Buy + 1-5/5-10/10-20/20+ + Min/Max
-- [ ] **Est. time in industry** — 0-1yr…10+yrs + Min/Max yrs
-- [ ] **Approx. GCI** — $ buckets + Min/Max
-- [ ] Active filters show a count badge on the pill; clearing resets
+### Search engine — 34/34
+- [x] Unfiltered agent count (20) and total sales volume
+- [x] Every filter returns correct counts: Location (city/zip/county/state × office/home/transacted), Sales volume (all/list/buy + buckets + min/max), Office Search (brand + office, **grouped include/exclude** — include+exclude sum to total), MLS (= junction count), Title, Closed units, Closed transactions, Est. time in industry, Approx. GCI, **Average sales price**, **Est. time in office**, **Average time at office**
+- [x] **Source toggle**: All = 20, Courted = 20, Zillow/Realtor = 0 (honest empty)
+- [x] **Office mode**: 13 offices, each with `agent_names` + office totals
+- [x] Sorting (asc ≠ desc) and pagination (page 1 ≠ page 2)
+- [x] Typeahead options for brand / office / mls / title / license / location
+- [x] Combined filters narrow correctly
+- [x] Each row carries `mls` + per-source `source_stats`
 
-## Top-right icons (Agent Search)
-- [ ] **Edit columns** (settings) — show/hide + reorder; Agent/Office locked; reset to default; persists
-- [ ] **Export** (download) — opens Send-to-Clay popup
-- [ ] **Save** (save) — save current filters as a named quick-filter; reload it later
+### Ingest webhook (end-to-end, live) — 12/12
+- [x] Bad key → 401; valid env token / generated API key → accepted
+- [x] Real Courted-column row (`Name`, `Office`, `State License`, `LTM Sales Volume`, `LTM Closed Units`, `Home City/State`, `Email`) → agent persisted with all fields correct
+- [x] Office row auto-created for the agent
+- [x] **Idempotent**: re-ingesting the same agent updates it (no duplicate) and updates changed metrics
+- [x] Writes an `audit_logs` entry (shows on Admin → Activity + Import page)
+- [x] **Column names must match the Courted CSV** (`Name`/`Office`/`LTM Sales Volume`, etc.) — the Admin → Data Webhook sample now shows the correct ones
 
-## Export → Send to Clay  [blocked: needs a client + real Clay webhook]
-- [ ] Webhooks → Add client with a Clay webhook URL
-- [ ] Agent Search → filter → Export → pick client + campaign + range → Send
-- [ ] Data arrives in the client's Clay table with campaign attached
+### Bison sync endpoint (live) — verified
+- [x] `POST /api/cron/bison-sync` with `x-cron-token` → 200; bad token → 401
+- [x] Handles a client whose Bison key is invalid gracefully (per-client error, overall ok)
 
-## Webhooks (clients)
-- [ ] Add client (name + Clay webhook + Bison API key); Bison key shows "Set"
-- [ ] Edit / Delete client
-- [ ] **Sync campaigns** button [blocked: needs real Bison API key + correct BISON_API_BASE]
+### Logged-in data layer under RLS — 11/11
+- [x] Create + delete a user via the **real service_role** (confirms Admin → Users invite/delete works)
+- [x] Sign-in; `fn_filter_search` + `fn_search_options` work for an authenticated user
+- [x] Saved views: insert / read-own / delete under RLS (this was the read-bug fix)
+- [x] Clients read under RLS; `fn_clients_for_mls` returns
 
-## EmailBison sync  [blocked: confirm base URL + add a client API key]
-- [ ] Confirm `BISON_API_BASE` (currently `https://app.outboundhero.co/api`)
-- [ ] Add client Bison key → Sync campaigns → campaigns populate
-- [ ] Campaigns appear in the Export popup dropdown
-- [ ] 6h auto-sync: scheduler hits `POST /api/cron/bison-sync` with `x-cron-token` [blocked: after deploy]
+---
 
-## Scraper ingest webhook  [verified locally; needs scraper integration]
-- [x] `POST /api/ingest/agents` with `x-ingest-token` upserts (idempotent); 401 without token
-- [ ] Point the scraper at it (Courted-CSV-shaped JSON rows: `{ source, rows: [...] }`)
-- [ ] Send a sample scraper payload so we can confirm/adjust the field mapping
+## [ ] Needs a manual logged-in (browser) pass
 
-## Left-nav pages (stubs for now)
-- [ ] **Import** — show ingest history / source counts (not built yet)
-- [ ] **Export** — show export history (not built yet)
+The visual/interaction layer — quick click-through at the live URL:
+- [ ] Login lands on **Agent Search**; top bar + sign-out; left nav highlights
+- [ ] Each filter popover: open → set → **Apply** → table + count update; active-count badge; **Clear**
+- [ ] **All filters** drawer: every filter in one panel; **Clear all** / **Show results**
+- [ ] **Agent ⇄ Office** toggle and **All / Courted / Zillow-Realtor** toggle switch the table
+- [ ] **Saved views** (save icon): save, reload, delete
+- [ ] **Edit columns** (sliders): show/hide, drag reorder, reset, persists on reload
+- [ ] **Export popup**: pick **method** (Clay/CSV), tick **columns**, set range
+- [ ] **Download CSV** actually downloads a file with the chosen columns
+- [ ] **Admin** page: tabs render; generate/revoke an API key; **invite a user** (password path); change role; view Activity
+- [ ] **Webhooks**: add / edit / delete a client; **Sync campaigns**
+- [ ] **Import** / **Export** pages show totals + history
 
-## Not built yet / next
-- [ ] **All filters** drawer (right sheet with every filter in one place)
-- [ ] License filter
-- [ ] Data-source toggle (Courted vs on-demand Zillow/Realtor)
-- [ ] Full Courted load (~977k) + office/brand aggregation + scale tuning
+## [blocked] Needs real data / external setup
+- [blocked] **Send to Clay** end-to-end — needs a client with a real Clay webhook URL
+- [blocked] **EmailBison campaigns populate** — needs a valid client Bison API key + confirmed `BISON_API_BASE`
+- [blocked] **6-hour auto-sync** — add the `CRON_TOKEN` secret in GitHub repo settings
+- [blocked] **Zillow/Realtor on-demand** + **multi-source per-source volumes** — needs the scraper connection
+- [blocked] **Full Courted load (~977k)** + scale/index tuning — needs the scraper handoff
+- [blocked] **"Clients using this MLS" seed** — needs the client↔MLS list
 
-## Open items needed from client
-- [ ] Real Supabase **service_role** key (current value is the anon key)
-- [ ] EmailBison API base URL confirmation + method (GET vs POST — docs were ambiguous)
-- [ ] Sample scraper JSON payload
+## Open items from the client
+- [x] Real Supabase **service_role** key — received + set
+- [ ] EmailBison API base URL confirmation + a working client key
+- [ ] Sample scraper JSON payload (to confirm against the Courted columns) + the on-demand trigger spec
 - [ ] Existing clients + their MLS list (for the "clients using this MLS" banner)
