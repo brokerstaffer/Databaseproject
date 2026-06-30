@@ -311,8 +311,22 @@ function NameSection({ value, onChange }: { value: IncludeExclude; onChange: (v:
   return (
     <Section title="Name" count={ieCount(value)}>
       <div className="flex items-center gap-6">
-        <RadioOpt label="Include" on={mode === "include"} onClick={() => setMode("include")} />
-        <RadioOpt label="Exclude" on={mode === "exclude"} onClick={() => setMode("exclude")} />
+        <RadioOpt
+          label="Include"
+          on={mode === "include"}
+          onClick={() => {
+            setMode("include");
+            onChange({ include: Array.from(new Set([...value.include, ...value.exclude])), exclude: [] });
+          }}
+        />
+        <RadioOpt
+          label="Exclude"
+          on={mode === "exclude"}
+          onClick={() => {
+            setMode("exclude");
+            onChange({ include: [], exclude: Array.from(new Set([...value.exclude, ...value.include])) });
+          }}
+        />
       </div>
       <div className="mt-2">
         <SearchBox placeholder="Search by name" query={query} setQuery={setQuery} options={options.filter((o) => !taken.includes(o))} onPick={pick} />
@@ -338,8 +352,22 @@ function LicenseSection({ value, onChange }: { value: IncludeExclude; onChange: 
   return (
     <Section title="License" count={ieCount(value)}>
       <div className="flex items-center gap-6">
-        <RadioOpt label="Include" on={mode === "include"} onClick={() => setMode("include")} />
-        <RadioOpt label="Exclude" on={mode === "exclude"} onClick={() => setMode("exclude")} />
+        <RadioOpt
+          label="Include"
+          on={mode === "include"}
+          onClick={() => {
+            setMode("include");
+            onChange({ include: Array.from(new Set([...value.include, ...value.exclude])), exclude: [] });
+          }}
+        />
+        <RadioOpt
+          label="Exclude"
+          on={mode === "exclude"}
+          onClick={() => {
+            setMode("exclude");
+            onChange({ include: [], exclude: Array.from(new Set([...value.exclude, ...value.include])) });
+          }}
+        />
       </div>
       <div className="mt-2">
         <SearchBox placeholder="Search license #" query={query} setQuery={setQuery} options={options.filter((o) => !taken.includes(o))} onPick={pick} />

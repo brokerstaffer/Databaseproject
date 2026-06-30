@@ -467,8 +467,24 @@ export function LicensePopover({ value, onChange }: { value: IncludeExclude; onC
       }}
     >
       <div className="flex items-center gap-6">
-        <RadioOpt label="Include" on={mode === "include"} onClick={() => setMode("include")} />
-        <RadioOpt label="Exclude" on={mode === "exclude"} onClick={() => setMode("exclude")} />
+        <RadioOpt
+          label="Include"
+          on={mode === "include"}
+          onClick={() => {
+            setMode("include");
+            setInc((a) => Array.from(new Set([...a, ...exc])));
+            setExc([]);
+          }}
+        />
+        <RadioOpt
+          label="Exclude"
+          on={mode === "exclude"}
+          onClick={() => {
+            setMode("exclude");
+            setExc((a) => Array.from(new Set([...a, ...inc])));
+            setInc([]);
+          }}
+        />
       </div>
       <div className="mt-2">
         <SearchBox placeholder="Search license #" query={query} setQuery={setQuery} options={options.filter((o) => !taken.includes(o))} onPick={pick} />
@@ -526,8 +542,24 @@ export function NamePopover({ value, onChange }: { value: IncludeExclude; onChan
       }}
     >
       <div className="flex items-center gap-6">
-        <RadioOpt label="Include" on={mode === "include"} onClick={() => setMode("include")} />
-        <RadioOpt label="Exclude" on={mode === "exclude"} onClick={() => setMode("exclude")} />
+        <RadioOpt
+          label="Include"
+          on={mode === "include"}
+          onClick={() => {
+            setMode("include");
+            setInc((a) => Array.from(new Set([...a, ...exc])));
+            setExc([]);
+          }}
+        />
+        <RadioOpt
+          label="Exclude"
+          on={mode === "exclude"}
+          onClick={() => {
+            setMode("exclude");
+            setExc((a) => Array.from(new Set([...a, ...inc])));
+            setInc([]);
+          }}
+        />
       </div>
       <div className="mt-2">
         <SearchBox placeholder="Search by name" query={query} setQuery={setQuery} options={options.filter((o) => !taken.includes(o))} onPick={pick} />
