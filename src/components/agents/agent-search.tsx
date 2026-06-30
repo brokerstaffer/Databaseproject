@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ArrowDown,
   ArrowUp,
@@ -21,6 +21,7 @@ import { AllFiltersDrawer } from "./all-filters-drawer";
 import { OfficeProfile } from "./office-profile";
 import { DEFAULT_FILTERS, SALES_VOLUME_BUCKETS, COUNT_BUCKETS, YEAR_BUCKETS, GCI_BUCKETS, ieCount, rangeCount, officeSearchCount } from "@/types/agent-filters";
 import type { Filters } from "@/types/agent-filters";
+import { useNameSearch } from "@/lib/stores/name-search";
 
 const PAGE_SIZES = [20, 50, 100];
 
@@ -209,11 +210,28 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
     setPage(1);
   }
 
-  // Top-bar search (?q=) drives the free-text name search.
+  // Top-bar name search flows through a shared store (not the URL), so it narrows the CURRENT
+  // filtered list instead of re-mounting this screen and wiping the applied filters.
+  const [nameSearch, setNameSearch] = useNameSearch();
+  const nameTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Seed the store from a deep-link (/search?q=…) once on mount.
   useEffect(() => {
-    setFilters((f) => (f.nameQuery === initialQuery ? f : { ...f, nameQuery: initialQuery }));
-    setPage(1);
-  }, [initialQuery]);
+    if (initialQuery) setNameSearch(initialQuery);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Apply the search term as the nameQuery filter (debounced), leaving all other filters intact.
+  useEffect(() => {
+    if (nameTimer.current) clearTimeout(nameTimer.current);
+    nameTimer.current = setTimeout(() => {
+      setFilters((f) => (f.nameQuery === nameSearch ? f : { ...f, nameQuery: nameSearch }));
+      setPage(1);
+    }, 300);
+    return () => {
+      if (nameTimer.current) clearTimeout(nameTimer.current);
+    };
+  }, [nameSearch]);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -306,7 +324,7 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
           {filters.nameQuery && (
             <span className="inline-flex items-center gap-1.5 rounded-md bg-neutral-200 px-2.5 py-1.5 text-sm font-medium text-neutral-900">
               Name: “{filters.nameQuery}”
-              <button type="button" onClick={() => setF("nameQuery", "")} className="text-neutral-500 hover:text-neutral-900" aria-label="Clear name search">
+              <button type="button" onClick={() => setNameSearch("")} className="text-neutral-500 hover:text-neutral-900" aria-label="Clear name search">
                 ×
               </button>
             </span>
@@ -366,6 +384,7 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
               filters={filters}
               onLoad={(f) => {
                 setFilters(f);
+                setNameSearch(f.nameQuery ?? ""); // keep the top-bar search box in sync with the loaded view
                 setPage(1);
               }}
             />
@@ -501,6 +520,7 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
         filters={filters}
         onApply={(f) => {
           setFilters(f);
+          setNameSearch(f.nameQuery ?? ""); // keep the top-bar search box in sync after applying the drawer
           setPage(1);
         }}
       />

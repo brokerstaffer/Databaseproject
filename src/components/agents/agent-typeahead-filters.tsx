@@ -85,6 +85,13 @@ export function SearchBox({
         onChange={(e) => setQuery(e.target.value)}
         onFocus={() => setFocus(true)}
         onBlur={() => setFocus(false)}
+        onKeyDown={(e) => {
+          // Enter adds whatever is typed, even without picking a suggestion.
+          if (e.key === "Enter" && query.trim()) {
+            e.preventDefault();
+            onPick(query.trim());
+          }
+        }}
         placeholder={placeholder}
         className="h-10 w-full rounded-lg border border-neutral-300 pl-9 pr-3 text-sm placeholder:text-neutral-400 focus:border-neutral-400 focus:outline-none"
       />
