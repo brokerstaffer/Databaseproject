@@ -19,29 +19,32 @@ async function authorized(req: NextRequest): Promise<boolean> {
 async function handle(req: NextRequest) {
   if (!(await authorized(req))) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
-  const base = process.env.BISON_API_BASE || "https://app.outboundhero.co/api";
+  const base = process.env.BISON_API_BASE || "https://send.brokerstaffer.com/api";
   const pool = getPool();
-  const { rows: clients } = await pool.query("select id, name, bison_api_key from clients where bison_api_key is not null");
 
-  const results: { client: string; campaigns?: number; error?: string }[] = [];
-  for (const c of clients) {
-    try {
-      const camps = await fetchClientCampaigns(c.bison_api_key, base);
-      for (const cm of camps) {
-        await pool.query(
-          `insert into bison_campaigns (client_id, bison_campaign_id, name, status, raw, fetched_at)
-           values ($1,$2,$3,$4,$5::jsonb, now())
-           on conflict (client_id, bison_campaign_id) do update set name=excluded.name, status=excluded.status, raw=excluded.raw, fetched_at=now()`,
-          [c.id, cm.bison_campaign_id, cm.name, cm.status, JSON.stringify(cm.raw)]
-        );
-      }
-      await pool.query("update clients set bison_synced_at=now() where id=$1", [c.id]);
-      results.push({ client: c.name, campaigns: camps.length });
-    } catch (e) {
-      results.push({ client: c.name, error: e instanceof Error ? e.message : "failed" });
+  // All clients share ONE EmailBison workspace, so we pull every campaign once with a single key
+  // (env BISON_API_KEY, else any stored client key — they're the same workspace) and associate to
+  // clients later by campaign-name prefix ("Client Name + Sender + Market").
+  const key =
+    process.env.BISON_API_KEY ||
+    (await pool.query("select bison_api_key from clients where bison_api_key is not null order by created_at limit 1")).rows[0]?.bison_api_key;
+  if (!key) return NextResponse.json({ ok: true, campaigns: 0, error: "No EmailBison workspace key set." });
+
+  try {
+    const camps = await fetchClientCampaigns(key, base);
+    for (const cm of camps) {
+      await pool.query(
+        `insert into bison_campaigns (bison_campaign_id, name, status, raw, fetched_at)
+         values ($1,$2,$3,$4::jsonb, now())
+         on conflict (bison_campaign_id) do update set name=excluded.name, status=excluded.status, raw=excluded.raw, fetched_at=now()`,
+        [cm.bison_campaign_id, cm.name, cm.status, JSON.stringify(cm.raw)]
+      );
     }
+    await pool.query("update clients set bison_synced_at=now()");
+    return NextResponse.json({ ok: true, campaigns: camps.length });
+  } catch (e) {
+    return NextResponse.json({ ok: true, campaigns: 0, error: e instanceof Error ? e.message : "failed" });
   }
-  return NextResponse.json({ ok: true, clients: clients.length, results });
 }
 
 export async function POST(req: NextRequest) {

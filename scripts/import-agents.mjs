@@ -37,6 +37,61 @@ const deriveTitle = (r) => {
 };
 
 const rows = parse(readFileSync(file, "utf8"), { columns: true, skip_empty_lines: true, relax_quotes: true, bom: true });
+
+// "23 years 8 months of experience" / "22" -> months
+function yearsToMos(raw) {
+  if (!raw) return undefined;
+  const y = /(\d+)\s*year/i.exec(raw);
+  const m = /(\d+)\s*month/i.exec(raw);
+  if (!y && !m) { const n = Number(raw); return Number.isFinite(n) && n > 0 ? n * 12 : undefined; }
+  return (y ? +y[1] : 0) * 12 + (m ? +m[1] : 0);
+}
+
+// "$756K" / "$1.2M" / "1,250,000" -> 756000 / 1200000 / 1250000
+function expandMoney(s) {
+  if (!s) return undefined;
+  const m = /([\d.]+)\s*([KkMmBb]?)/.exec(s.toString().replace(/[$,]/g, ""));
+  if (!m) return undefined;
+  let n = parseFloat(m[1]);
+  const u = m[2].toUpperCase();
+  if (u === "K") n *= 1e3;
+  else if (u === "M") n *= 1e6;
+  else if (u === "B") n *= 1e9;
+  return Number.isFinite(n) ? Math.round(n) : undefined;
+}
+
+// Translate a Realtor/Zillow row into the canonical Courted-style keys the loop reads.
+function remapRow(raw, source) {
+  if (source === "realtor") {
+    return {
+      "Name": raw["Name"], "First Name": raw["First Name"], "Last Name": raw["Last Name"],
+      "State License": raw["License Number"],
+      "Email": raw["Email"], "Phone": raw["Phone"], "Mobile Phone": raw["Mobile Phone"],
+      "Office": raw["Office"],
+      "Office City": raw["Office City"], "Office State": raw["Office State"], "Office Zip": raw["Office Postal"], "Office Address": raw["Office Address"],
+      "Years Of Experience": raw["Years Of Experience"],
+      "Agent Tenure (mos)": yearsToMos(raw["Years Of Experience"]),
+      "Active Listings": raw["For Sale Count"],
+      "Profile Photo URL": raw["Profile Photo URL"],
+    };
+  }
+  if (source === "zillow") {
+    return {
+      "Name": raw["Name"],
+      "State License": raw["License Number"],
+      "Email": raw["Email"], "Phone": raw["Phone"],
+      "Office": raw["Brokerage"], "Office Address": raw["Brokerage Address"],
+      "Office City": raw["City"], "Office State": raw["State"], "Office Zip": raw["Zip Code"],
+      "Years Of Experience": raw["Years of Experience"],
+      "Agent Tenure (mos)": yearsToMos(raw["Years of Experience"]),
+      "LTM Avg Sale Price": expandMoney(raw["Average Price"]),
+      "LTM Closed Transactions": raw["Sales Count Last Year"],
+      "Active Listings": raw["Active Listings Count"],
+      "Profile Photo URL": raw["Profile Photo URL"],
+    };
+  }
+  return raw; // courted: already canonical
+}
 console.log(`Parsed ${rows.length} rows from ${file} (source=${SOURCE}${DRY ? ", DRY RUN" : ""})`);
 
 const client = new pg.Client({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
@@ -56,7 +111,8 @@ function matchKey(license, email, phone, fullName, officeZip) {
 try {
   if (!DRY) await client.query("begin");
 
-  for (const r of rows) {
+  for (const _raw of rows) {
+    const r = remapRow(_raw, SOURCE);
     // ---------- office ----------
     const brand = txt(r["Brand"]);
     const officeName = txt(r["Custom Office Name"]) || txt(r["Office"]);

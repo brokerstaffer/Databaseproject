@@ -35,16 +35,10 @@ export default function WebhooksPage() {
       toast.error(j.error ?? "Sync failed");
       return;
     }
-    const results: { client: string; campaigns?: number; error?: string }[] = j.results ?? [];
-    const totalCamps = results.reduce((s, r) => s + (r.campaigns ?? 0), 0);
-    const failed = results.filter((r) => r.error);
-    if (failed.length) {
-      toast.error(
-        `Synced ${totalCamps} campaign(s). ${failed.length} failed — ${failed.map((f) => `${f.client}: ${f.error}`).join("; ")}`,
-        { duration: 9000 }
-      );
+    if (j.error) {
+      toast.error(`Sync failed — ${j.error}`, { duration: 9000 });
     } else {
-      toast.success(`Synced ${totalCamps} campaigns across ${j.clients ?? 0} client(s)`);
+      toast.success(`Synced ${j.campaigns ?? 0} campaigns from the workspace`);
     }
     load();
   }
