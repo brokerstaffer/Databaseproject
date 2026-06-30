@@ -37,8 +37,15 @@ export default function WebhooksPage() {
     }
     const results: { client: string; campaigns?: number; error?: string }[] = j.results ?? [];
     const totalCamps = results.reduce((s, r) => s + (r.campaigns ?? 0), 0);
-    const errs = results.filter((r) => r.error).length;
-    toast.success(`Synced ${totalCamps} campaigns across ${j.clients ?? 0} client(s)${errs ? `, ${errs} failed` : ""}`);
+    const failed = results.filter((r) => r.error);
+    if (failed.length) {
+      toast.error(
+        `Synced ${totalCamps} campaign(s). ${failed.length} failed — ${failed.map((f) => `${f.client}: ${f.error}`).join("; ")}`,
+        { duration: 9000 }
+      );
+    } else {
+      toast.success(`Synced ${totalCamps} campaigns across ${j.clients ?? 0} client(s)`);
+    }
     load();
   }
 

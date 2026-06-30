@@ -270,6 +270,15 @@ export async function upsertAgentRows(client: PoolClient, rows: Row[], source: s
         await client.query(`insert into office_mls (office_id, mls_id) values ($1,$2) on conflict do nothing`, [officeId, mlsId]);
       }
     }
+
+    // keep office.agent_count in sync for the offices touched in this batch
+    const touchedOffices = [...new Set(officeCache.values())];
+    if (touchedOffices.length) {
+      await client.query(
+        `update offices o set agent_count = (select count(*) from agents a where a.office_id = o.id) where o.id = any($1::uuid[])`,
+        [touchedOffices]
+      );
+    }
     await client.query("commit");
   } catch (e) {
     await client.query("rollback").catch(() => {});

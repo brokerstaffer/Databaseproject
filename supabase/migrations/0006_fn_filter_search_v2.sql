@@ -119,14 +119,16 @@ begin
     execute format('select count(*), coalesce(sum(sales_volume), 0) from offices where %s', v_where) into v_count, v_volume;
 
     execute format($q$
-      select coalesce(jsonb_agg(t), '[]'::jsonb)
+      select coalesce(jsonb_agg(t.j), '[]'::jsonb)
       from (
-        select o.*,
-          (select coalesce(jsonb_agg(ag.full_name order by ag.sv desc nulls last), '[]'::jsonb)
-             from (select full_name, sales_volume sv from agents where office_id = o.id order by sales_volume desc nulls last limit 25) ag) as agent_names
+        select to_jsonb(o) || jsonb_build_object(
+                 'agent_count', (select count(*)::int from agents a where a.office_id = o.id),
+                 'agent_names', (select coalesce(jsonb_agg(ag.full_name order by ag.sv desc nulls last), '[]'::jsonb)
+                                  from (select full_name, sales_volume sv from agents where office_id = o.id order by sales_volume desc nulls last limit 25) ag)
+               ) as j
         from offices o
         where %s
-        order by %I %s nulls last
+        order by o.%I %s nulls last
         limit %s offset %s
       ) t
     $q$, v_where, v_sort_col, v_dir, p_limit, p_offset) into v_data;
@@ -269,6 +271,20 @@ begin
     if jsonb_array_length(coalesce(f->'exclude', '[]'::jsonb)) > 0 then
       parts := parts || format('(license_number is null or license_number <> ALL(%L::text[]))', array(select jsonb_array_elements_text(f->'exclude')));
     end if;
+  end if;
+
+  -- NAME: include/exclude exact full names + free-text "nameQuery" (search bar).
+  f := p_filters->'name';
+  if f is not null then
+    if jsonb_array_length(coalesce(f->'include', '[]'::jsonb)) > 0 then
+      parts := parts || format('full_name = ANY(%L::text[])', array(select jsonb_array_elements_text(f->'include')));
+    end if;
+    if jsonb_array_length(coalesce(f->'exclude', '[]'::jsonb)) > 0 then
+      parts := parts || format('(full_name is null or full_name <> ALL(%L::text[]))', array(select jsonb_array_elements_text(f->'exclude')));
+    end if;
+  end if;
+  if coalesce(p_filters->>'nameQuery', '') <> '' then
+    parts := parts || format('full_name ilike %L', '%' || (p_filters->>'nameQuery') || '%');
   end if;
 
   if array_length(parts, 1) > 0 then

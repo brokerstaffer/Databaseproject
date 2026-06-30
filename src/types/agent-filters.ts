@@ -43,6 +43,8 @@ export interface Filters {
   mls: IncludeExclude; // mls ids
   title: IncludeExclude;
   license: IncludeExclude; // license numbers
+  name: IncludeExclude; // full names (include/exclude)
+  nameQuery: string; // free-text name search (top search bar)
 }
 
 export const DEFAULT_FILTERS: Filters = {
@@ -59,6 +61,8 @@ export const DEFAULT_FILTERS: Filters = {
   mls: { include: [], exclude: [] },
   title: { include: [], exclude: [] },
   license: { include: [], exclude: [] },
+  name: { include: [], exclude: [] },
+  nameQuery: "",
 };
 
 // Bucket sets: { key } is sent to the RPC (must match fn_bucket_cond); { label } is displayed.

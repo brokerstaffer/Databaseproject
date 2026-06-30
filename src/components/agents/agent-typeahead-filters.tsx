@@ -471,3 +471,62 @@ export function LicensePopover({ value, onChange }: { value: IncludeExclude; onC
     </FilterPopoverShell>
   );
 }
+
+// ---------- Name (typeahead include/exclude on full name) ----------
+export function NamePopover({ value, onChange }: { value: IncludeExclude; onChange: (v: IncludeExclude) => void }) {
+  const [open, setOpen] = useState(false);
+  const [mode, setMode] = useState<"include" | "exclude">("include");
+  const [inc, setInc] = useState<string[]>(value.include);
+  const [exc, setExc] = useState<string[]>(value.exclude);
+  const { query, setQuery, options } = useTypeahead("name");
+
+  useEffect(() => {
+    if (open) {
+      setInc(value.include);
+      setExc(value.exclude);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  const count = value.include.length + value.exclude.length;
+  const taken = [...inc, ...exc];
+  const pick = (v: string) => {
+    if (mode === "include") {
+      setInc((a) => (a.includes(v) ? a : [...a, v]));
+      setExc((a) => a.filter((x) => x !== v));
+    } else {
+      setExc((a) => (a.includes(v) ? a : [...a, v]));
+      setInc((a) => a.filter((x) => x !== v));
+    }
+    setQuery("");
+  };
+
+  return (
+    <FilterPopoverShell
+      label="Name"
+      count={count}
+      open={open}
+      onOpenChange={setOpen}
+      width="w-[420px]"
+      onClear={() => {
+        setInc([]);
+        setExc([]);
+        setQuery("");
+      }}
+      onApply={() => {
+        onChange({ include: inc, exclude: exc });
+        setOpen(false);
+      }}
+    >
+      <div className="flex items-center gap-6">
+        <RadioOpt label="Include" on={mode === "include"} onClick={() => setMode("include")} />
+        <RadioOpt label="Exclude" on={mode === "exclude"} onClick={() => setMode("exclude")} />
+      </div>
+      <div className="mt-2">
+        <SearchBox placeholder="Search by name" query={query} setQuery={setQuery} options={options.filter((o) => !taken.includes(o))} onPick={pick} />
+      </div>
+      <Chips items={inc} onRemove={(v) => setInc(inc.filter((x) => x !== v))} />
+      <Chips items={exc} tone="exclude" onRemove={(v) => setExc(exc.filter((x) => x !== v))} />
+    </FilterPopoverShell>
+  );
+}

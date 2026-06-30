@@ -56,6 +56,20 @@ export function SavedViews({ filters, onLoad }: { filters: Filters; onLoad: (f: 
     if (res.ok) load();
   }
 
+  async function update(id: string) {
+    const res = await fetch(`/api/lists/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ filters }),
+    });
+    if (res.ok) {
+      toast.success("View updated with current filters");
+      load();
+    } else {
+      toast.error("Update failed");
+    }
+  }
+
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
@@ -98,9 +112,14 @@ export function SavedViews({ filters, onLoad }: { filters: Filters; onLoad: (f: 
                   <FolderOpen className="h-4 w-4 text-neutral-400" />
                   {v.name}
                 </button>
-                <button type="button" onClick={() => del(v.id)} className="text-neutral-300 hover:text-red-600">
-                  <Trash2 className="h-4 w-4" />
-                </button>
+                <div className="flex items-center gap-2">
+                  <button type="button" onClick={() => update(v.id)} title="Save current filters into this view" className="text-xs font-medium text-neutral-500 hover:text-neutral-900">
+                    Update
+                  </button>
+                  <button type="button" onClick={() => del(v.id)} className="text-neutral-300 hover:text-red-600" title="Delete view">
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
               </div>
             ))
           )}

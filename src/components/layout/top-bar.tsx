@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Search, ClipboardList, Bell, Building2, LogOut } from "lucide-react";
@@ -15,6 +16,7 @@ import { createClient } from "@/lib/supabase/client";
 
 export function TopBar({ initials, email }: { initials: string; email: string }) {
   const router = useRouter();
+  const [q, setQ] = useState("");
 
   async function signOut() {
     const supabase = createClient();
@@ -28,13 +30,22 @@ export function TopBar({ initials, email }: { initials: string; email: string })
       <Link href="/search" className="flex h-9 w-9 items-center justify-center rounded-md bg-neutral-800 text-white" title="Broker Staffer">
         <Building2 className="h-5 w-5" />
       </Link>
-      <div className="relative w-full max-w-sm">
+      <form
+        className="relative w-full max-w-sm"
+        onSubmit={(e) => {
+          e.preventDefault();
+          const v = q.trim();
+          router.push(v ? `/search?q=${encodeURIComponent(v)}` : "/search");
+        }}
+      >
         <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400" />
         <input
-          placeholder="Search Broker Staffer"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="Search agents by name…"
           className="h-9 w-full rounded-lg bg-neutral-800/80 pl-9 pr-3 text-sm text-white placeholder:text-neutral-400 focus:outline-none focus:ring-1 focus:ring-neutral-600"
         />
-      </div>
+      </form>
       <div className="ml-auto flex items-center gap-4">
         <button type="button" className="text-neutral-300 hover:text-white" title="Lists">
           <ClipboardList className="h-5 w-5" />

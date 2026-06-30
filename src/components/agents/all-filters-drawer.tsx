@@ -296,6 +296,33 @@ function TitleSection({ value, onChange }: { value: IncludeExclude; onChange: (v
   );
 }
 
+function NameSection({ value, onChange }: { value: IncludeExclude; onChange: (v: IncludeExclude) => void }) {
+  const [mode, setMode] = useState<"include" | "exclude">("include");
+  const { query, setQuery, options } = useTypeahead("name");
+  const taken = [...value.include, ...value.exclude];
+  const pick = (v: string) => {
+    onChange(
+      mode === "include"
+        ? { include: value.include.includes(v) ? value.include : [...value.include, v], exclude: value.exclude.filter((x) => x !== v) }
+        : { exclude: value.exclude.includes(v) ? value.exclude : [...value.exclude, v], include: value.include.filter((x) => x !== v) }
+    );
+    setQuery("");
+  };
+  return (
+    <Section title="Name" count={ieCount(value)}>
+      <div className="flex items-center gap-6">
+        <RadioOpt label="Include" on={mode === "include"} onClick={() => setMode("include")} />
+        <RadioOpt label="Exclude" on={mode === "exclude"} onClick={() => setMode("exclude")} />
+      </div>
+      <div className="mt-2">
+        <SearchBox placeholder="Search by name" query={query} setQuery={setQuery} options={options.filter((o) => !taken.includes(o))} onPick={pick} />
+      </div>
+      <Chips items={value.include} onRemove={(v) => onChange({ ...value, include: value.include.filter((x) => x !== v) })} />
+      <Chips items={value.exclude} tone="exclude" onRemove={(v) => onChange({ ...value, exclude: value.exclude.filter((x) => x !== v) })} />
+    </Section>
+  );
+}
+
 function LicenseSection({ value, onChange }: { value: IncludeExclude; onChange: (v: IncludeExclude) => void }) {
   const [mode, setMode] = useState<"include" | "exclude">("include");
   const { query, setQuery, options } = useTypeahead("license");
@@ -356,6 +383,7 @@ export function AllFiltersDrawer({
           <RangeSection title="Sales volume" count={rangeCount(draft.salesVolume)} value={draft.salesVolume} onChange={(v) => set("salesVolume", v as RangeSide)} buckets={SALES_VOLUME_BUCKETS} hasSide prefix="$" />
           <OfficeSearchSection value={draft.officeSearch} onChange={(v) => set("officeSearch", v)} />
           <MlsSection value={draft.mls} onChange={(v) => set("mls", v)} />
+          <NameSection value={draft.name} onChange={(v) => set("name", v)} />
           <TitleSection value={draft.title} onChange={(v) => set("title", v)} />
           <LicenseSection value={draft.license} onChange={(v) => set("license", v)} />
           <RangeSection title="Closed units" count={rangeCount(draft.closedUnits)} value={draft.closedUnits} onChange={(v) => set("closedUnits", v as RangeSide)} buckets={COUNT_BUCKETS} hasSide />

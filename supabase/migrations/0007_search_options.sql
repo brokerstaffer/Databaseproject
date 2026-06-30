@@ -53,6 +53,11 @@ begin
     execute format($f$select coalesce(jsonb_agg(v order by v), '[]'::jsonb)
       from (select distinct license_number v from agents where license_number is not null and license_number ilike %L order by 1 limit 50) s$f$, q || '%') into res;
     return res;
+
+  elsif p_type = 'name' then
+    execute format($f$select coalesce(jsonb_agg(v order by v), '[]'::jsonb)
+      from (select distinct full_name v from agents where full_name is not null and full_name ilike %L order by 1 limit 50) s$f$, '%' || q || '%') into res;
+    return res;
   end if;
 
   return '[]'::jsonb;

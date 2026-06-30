@@ -13,11 +13,12 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import type { Agent, SearchResponse, SortDir, SearchMode, DataSource } from "@/types/agent";
 import { RangePopover, TitlePopover } from "./agent-filters";
-import { LocationPopover, OfficeSearchPopover, MlsPopover, LicensePopover } from "./agent-typeahead-filters";
+import { LocationPopover, OfficeSearchPopover, MlsPopover, LicensePopover, NamePopover } from "./agent-typeahead-filters";
 import { ExportDialog } from "./export-dialog";
 import { SavedViews } from "./saved-views";
 import { EditColumnsModal } from "./edit-columns";
 import { AllFiltersDrawer } from "./all-filters-drawer";
+import { OfficeProfile } from "./office-profile";
 import { DEFAULT_FILTERS, SALES_VOLUME_BUCKETS, COUNT_BUCKETS, YEAR_BUCKETS, GCI_BUCKETS, ieCount, rangeCount, officeSearchCount } from "@/types/agent-filters";
 import type { Filters } from "@/types/agent-filters";
 
@@ -138,7 +139,7 @@ const OFFICE_COLUMNS: Col[] = [
   },
 ];
 
-export function AgentSearch() {
+export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
   const [rows, setRows] = useState<Agent[]>([]);
   const [total, setTotal] = useState(0);
   const [vol, setVol] = useState(0);
@@ -154,6 +155,7 @@ export function AgentSearch() {
   const [allFiltersOpen, setAllFiltersOpen] = useState(false);
   const [mode, setMode] = useState<SearchMode>("agent");
   const [source, setSource] = useState<DataSource>("all");
+  const [profileOfficeId, setProfileOfficeId] = useState<string | null>(null);
   const [colOrder, setColOrder] = useState<string[]>(DEFAULT_COL_ORDER);
   const [hiddenCols, setHiddenCols] = useState<Set<string>>(new Set());
 
@@ -198,12 +200,20 @@ export function AgentSearch() {
     rangeCount(filters.approxGci) +
     rangeCount(filters.avgSalePrice) +
     rangeCount(filters.estTimeInOffice) +
-    rangeCount(filters.avgTimeAtOffice);
+    rangeCount(filters.avgTimeAtOffice) +
+    ieCount(filters.name) +
+    (filters.nameQuery ? 1 : 0);
 
   function setF<K extends keyof Filters>(k: K, v: Filters[K]) {
     setFilters((p) => ({ ...p, [k]: v }));
     setPage(1);
   }
+
+  // Top-bar search (?q=) drives the free-text name search.
+  useEffect(() => {
+    setFilters((f) => (f.nameQuery === initialQuery ? f : { ...f, nameQuery: initialQuery }));
+    setPage(1);
+  }, [initialQuery]);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -293,12 +303,21 @@ export function AgentSearch() {
           </div>
         </div>
         <div className="flex flex-wrap items-center justify-end gap-1.5">
+          {filters.nameQuery && (
+            <span className="inline-flex items-center gap-1.5 rounded-md bg-neutral-200 px-2.5 py-1.5 text-sm font-medium text-neutral-900">
+              Name: “{filters.nameQuery}”
+              <button type="button" onClick={() => setF("nameQuery", "")} className="text-neutral-500 hover:text-neutral-900" aria-label="Clear name search">
+                ×
+              </button>
+            </span>
+          )}
           <LocationPopover value={filters.location} onChange={(v) => setF("location", v)} />
           <RangePopover label="Sales volume" hasSide prefix="$" buckets={SALES_VOLUME_BUCKETS} value={filters.salesVolume} onChange={(v) => setF("salesVolume", v)} />
           <OfficeSearchPopover value={filters.officeSearch} onChange={(v) => setF("officeSearch", v)} />
           <MlsPopover value={filters.mls} onChange={(v) => setF("mls", v)} />
           <TitlePopover value={filters.title} onChange={(v) => setF("title", v)} />
           <LicensePopover value={filters.license} onChange={(v) => setF("license", v)} />
+          <NamePopover value={filters.name} onChange={(v) => setF("name", v)} />
           <RangePopover label="Closed units" hasSide prefix="#" buckets={COUNT_BUCKETS} value={filters.closedUnits} onChange={(v) => setF("closedUnits", v)} />
           <RangePopover label="Closed transactions" hasSide prefix="#" buckets={COUNT_BUCKETS} value={filters.closedTransactions} onChange={(v) => setF("closedTransactions", v)} />
           <RangePopover label="Est. time in industry" suffix="yrs" buckets={YEAR_BUCKETS} value={{ side: "all", ...filters.estTimeInIndustry }} onChange={(v) => setF("estTimeInIndustry", { buckets: v.buckets, min: v.min, max: v.max })} />
@@ -404,8 +423,12 @@ export function AgentSearch() {
                 </tr>
               ) : (
                 rows.map((a) => (
-                  <tr key={a.id} className="border-b border-neutral-100 hover:bg-neutral-50">
-                    <td className="w-10 px-4 py-3">
+                  <tr
+                    key={a.id}
+                    className={`border-b border-neutral-100 hover:bg-neutral-50 ${mode === "office" ? "cursor-pointer" : ""}`}
+                    onClick={mode === "office" ? () => setProfileOfficeId(a.id) : undefined}
+                  >
+                    <td className="w-10 px-4 py-3" onClick={(e) => e.stopPropagation()}>
                       <Checkbox checked={selected.has(a.id)} onCheckedChange={() => toggleOne(a.id)} aria-label="Select row" />
                     </td>
                     {activeColumns.map((col) => (
@@ -481,6 +504,7 @@ export function AgentSearch() {
           setPage(1);
         }}
       />
+      <OfficeProfile officeId={profileOfficeId} onOpenChange={(o) => { if (!o) setProfileOfficeId(null); }} />
     </div>
   );
 }
