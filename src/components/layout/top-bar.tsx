@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Search, ClipboardList, Bell, Building2, LogOut } from "lucide-react";
@@ -17,6 +17,17 @@ import { createClient } from "@/lib/supabase/client";
 export function TopBar({ initials, email }: { initials: string; email: string }) {
   const router = useRouter();
   const [q, setQ] = useState("");
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Live search: update the box instantly, then push to /search?q=… after a short pause
+  // (or immediately on Enter). The Agent Search screen reads ?q and filters by name.
+  function onSearch(v: string, immediate = false) {
+    setQ(v);
+    if (timer.current) clearTimeout(timer.current);
+    const go = () => router.replace(v.trim() ? `/search?q=${encodeURIComponent(v.trim())}` : "/search");
+    if (immediate) go();
+    else timer.current = setTimeout(go, 300);
+  }
 
   async function signOut() {
     const supabase = createClient();
@@ -34,14 +45,13 @@ export function TopBar({ initials, email }: { initials: string; email: string })
         className="relative w-full max-w-sm"
         onSubmit={(e) => {
           e.preventDefault();
-          const v = q.trim();
-          router.push(v ? `/search?q=${encodeURIComponent(v)}` : "/search");
+          onSearch(q, true);
         }}
       >
         <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400" />
         <input
           value={q}
-          onChange={(e) => setQ(e.target.value)}
+          onChange={(e) => onSearch(e.target.value)}
           placeholder="Search agents by name…"
           className="h-9 w-full rounded-lg bg-neutral-800/80 pl-9 pr-3 text-sm text-white placeholder:text-neutral-400 focus:outline-none focus:ring-1 focus:ring-neutral-600"
         />
