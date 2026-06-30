@@ -23,6 +23,8 @@ export async function POST(req: NextRequest) {
 
   const { data: client } = await supabase.from("clients").select("name, clay_webhook_url").eq("id", clientId).single();
   if (!client?.clay_webhook_url) return NextResponse.json({ error: "This client has no Clay webhook configured." }, { status: 400 });
+  const webhookUrl: string = client.clay_webhook_url;
+  const clientName: string = client.name ?? "";
 
   // ---- gather rows (bypasses RLS via SECURITY DEFINER RPC / pg pool) ----
   let rows: Record<string, unknown>[] = [];
@@ -67,13 +69,13 @@ export async function POST(req: NextRequest) {
   async function postOne(r: Record<string, unknown>): Promise<boolean> {
     const body = JSON.stringify({
       ...buildLabeledRow(r, keys),
-      Client: client.name,
+      Client: clientName,
       "Campaign Id": campaignId,
       "Campaign Name": campaignName,
     });
     for (let attempt = 0; attempt < 4; attempt++) {
       try {
-        const res = await fetch(client.clay_webhook_url, { method: "POST", headers: { "Content-Type": "application/json" }, body });
+        const res = await fetch(webhookUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body });
         if (res.ok) return true;
         statusCounts[res.status] = (statusCounts[res.status] ?? 0) + 1;
         if (res.status === 429 || res.status >= 500) {
