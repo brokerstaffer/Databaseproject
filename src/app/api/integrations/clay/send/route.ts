@@ -55,33 +55,43 @@ export async function POST(req: NextRequest) {
 
   if (rows.length === 0) return NextResponse.json({ error: "No agents to send." }, { status: 400 });
 
-  // ---- post to the client's Clay webhook in batches ----
-  const BATCH = 500;
+  // ---- post EACH agent to the client's Clay webhook as its own row ----
+  // Clay creates one row per webhook request, so we send one request per agent
+  // (a few in parallel for speed). Each row carries the agent's columns + client/campaign.
+  const CONCURRENCY = 10;
   let sent = 0;
-  for (let i = 0; i < rows.length; i += BATCH) {
-    const batch = rows.slice(i, i + BATCH);
-    const res = await fetch(client.clay_webhook_url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        client: client.name,
-        campaign_id: campaignId,
-        campaign_name: campaignName,
-        batch_index: Math.floor(i / BATCH),
-        count: batch.length,
-        agents: batch.map((r) => buildLabeledRow(r as Record<string, unknown>, keys)),
-      }),
-    });
-    if (!res.ok) {
-      return NextResponse.json({ error: `Clay webhook returned ${res.status}`, sent }, { status: 502 });
-    }
-    sent += batch.length;
+  let failed = 0;
+  for (let i = 0; i < rows.length; i += CONCURRENCY) {
+    const chunk = rows.slice(i, i + CONCURRENCY);
+    const oks = await Promise.all(
+      chunk.map(async (r) => {
+        try {
+          const res = await fetch(client.clay_webhook_url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              ...buildLabeledRow(r as Record<string, unknown>, keys),
+              Client: client.name,
+              "Campaign Id": campaignId,
+              "Campaign Name": campaignName,
+            }),
+          });
+          return res.ok;
+        } catch {
+          return false;
+        }
+      })
+    );
+    sent += oks.filter(Boolean).length;
+    failed += oks.filter((ok) => !ok).length;
   }
+
+  if (sent === 0) return NextResponse.json({ error: "Clay webhook rejected all rows.", failed }, { status: 502 });
 
   await logAudit({
     action: "clay_send",
     performedBy: user.email ?? null,
-    details: `Sent ${sent} agents to ${client.name}'s Clay${campaignName ? ` (campaign: ${campaignName})` : ""}`,
+    details: `Sent ${sent} agents (one row each) to ${client.name}'s Clay${campaignName ? ` (campaign: ${campaignName})` : ""}${failed ? ` — ${failed} failed` : ""}`,
   });
-  return NextResponse.json({ ok: true, sent, client: client.name });
+  return NextResponse.json({ ok: true, sent, failed, client: client.name });
 }

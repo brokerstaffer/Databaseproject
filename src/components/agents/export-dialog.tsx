@@ -109,7 +109,7 @@ export function ExportDialog({
     setBusy(false);
     const j = await res.json().catch(() => ({}));
     if (res.ok) {
-      toast.success(`Sent ${j.sent} agents to ${j.client}'s Clay`);
+      toast.success(`Sent ${j.sent} agents (one row each) to ${j.client}'s Clay${j.failed ? ` — ${j.failed} failed` : ""}`);
       onOpenChange(false);
     } else {
       toast.error(j.error ?? "Send failed");
