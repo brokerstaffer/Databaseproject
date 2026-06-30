@@ -38,6 +38,10 @@ const usd = (n: number | null | undefined) => (n == null ? "N/A" : "$" + Math.ro
 const numv = (n: number | null | undefined) => (n == null ? "N/A" : n.toLocaleString());
 const na = (s: string | null | undefined) => (s == null || s === "" ? "N/A" : s);
 const phoneFmt = (s: string | null | undefined) => (s == null || s === "" ? "None" : s);
+// Does this agent's name contain the top-bar search term? (case-insensitive) — drives the highlight.
+function nameMatches(name: string | null | undefined, term: string): boolean {
+  return !!term && !!name && name.toLowerCase().includes(term.toLowerCase());
+}
 function ym(m: number | null | undefined): string {
   if (m == null) return "N/A";
   const months = Math.round(m);
@@ -187,6 +191,7 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
 
   const visibleColumns = colOrder.map((k) => COL_BY_KEY[k]).filter((c): c is Col => !!c && !hiddenCols.has(c.key));
   const activeColumns = mode === "office" ? OFFICE_COLUMNS : visibleColumns;
+  const highlightTerm = (filters.nameQuery ?? "").trim();
 
   const activeFilterCount =
     filters.location.values.length +
@@ -202,8 +207,8 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
     rangeCount(filters.avgSalePrice) +
     rangeCount(filters.estTimeInOffice) +
     rangeCount(filters.avgTimeAtOffice) +
-    ieCount(filters.name) +
-    (filters.nameQuery ? 1 : 0);
+    ieCount(filters.name);
+  // The top-bar search is a find/highlight tool, not a filter — so it does not count here.
 
   function setF<K extends keyof Filters>(k: K, v: Filters[K]) {
     setFilters((p) => ({ ...p, [k]: v }));
@@ -322,9 +327,9 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
         </div>
         <div className="flex flex-wrap items-center justify-end gap-1.5">
           {filters.nameQuery && (
-            <span className="inline-flex items-center gap-1.5 rounded-md bg-neutral-200 px-2.5 py-1.5 text-sm font-medium text-neutral-900">
-              Name: “{filters.nameQuery}”
-              <button type="button" onClick={() => setNameSearch("")} className="text-neutral-500 hover:text-neutral-900" aria-label="Clear name search">
+            <span className="inline-flex items-center gap-1.5 rounded-md bg-green-200/70 px-2.5 py-1.5 text-sm font-medium text-green-900">
+              Find: “{filters.nameQuery}”
+              <button type="button" onClick={() => setNameSearch("")} className="text-green-700 hover:text-green-900" aria-label="Clear name search">
                 ×
               </button>
             </span>
@@ -441,25 +446,31 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
                   </td>
                 </tr>
               ) : (
-                rows.map((a) => (
-                  <tr
-                    key={a.id}
-                    className={`border-b border-neutral-100 hover:bg-neutral-50 ${mode === "office" ? "cursor-pointer" : ""}`}
-                    onClick={mode === "office" ? () => setProfileOfficeId(a.id) : undefined}
-                  >
-                    <td className="w-10 px-4 py-3" onClick={(e) => e.stopPropagation()}>
-                      <Checkbox checked={selected.has(a.id)} onCheckedChange={() => toggleOne(a.id)} aria-label="Select row" />
-                    </td>
-                    {activeColumns.map((col) => (
-                      <td
-                        key={col.key}
-                        className={`whitespace-nowrap px-4 py-3 text-neutral-700 ${col.align === "right" ? "text-right tabular-nums" : "text-left"}`}
-                      >
-                        {col.render(a)}
+                rows.map((a) => {
+                  const hit = mode !== "office" && nameMatches(a.full_name, highlightTerm);
+                  return (
+                    <tr
+                      key={a.id}
+                      className={`border-b border-neutral-100 hover:bg-neutral-50 ${mode === "office" ? "cursor-pointer" : ""}`}
+                      onClick={mode === "office" ? () => setProfileOfficeId(a.id) : undefined}
+                    >
+                      <td className="w-10 px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                        <Checkbox checked={selected.has(a.id)} onCheckedChange={() => toggleOne(a.id)} aria-label="Select row" />
                       </td>
-                    ))}
-                  </tr>
-                ))
+                      {activeColumns.map((col) => {
+                        const cellHit = hit && col.key === "agent"; // light-green highlight on the matching name
+                        return (
+                          <td
+                            key={col.key}
+                            className={`whitespace-nowrap px-4 py-3 text-neutral-700 ${col.align === "right" ? "text-right tabular-nums" : "text-left"} ${cellHit ? "bg-green-200/70" : ""}`}
+                          >
+                            {col.render(a)}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
