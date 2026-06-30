@@ -53,6 +53,65 @@ const digits = (v: unknown): string | null => {
 const deriveTitle = (r: Row): string =>
   yn(r["Is Managing Broker"]) ? "Managing Broker" : yn(r["Is Team Leader"]) ? "Team Leader" : "Salesperson";
 
+// "23 years 8 months of experience" / "22" -> months
+function yearsToMos(raw: unknown): number | undefined {
+  const s = txt(raw);
+  if (!s) return undefined;
+  const y = /(\d+)\s*year/i.exec(s);
+  const m = /(\d+)\s*month/i.exec(s);
+  if (!y && !m) {
+    const n = Number(s);
+    return Number.isFinite(n) && n > 0 ? n * 12 : undefined;
+  }
+  return (y ? +y[1] : 0) * 12 + (m ? +m[1] : 0);
+}
+// "$756K" / "$1.2M" / "1,250,000" -> 756000 / 1200000 / 1250000
+function expandMoney(raw: unknown): number | undefined {
+  const s = txt(raw);
+  if (!s) return undefined;
+  const m = /([\d.]+)\s*([KkMmBb]?)/.exec(s.replace(/[$,]/g, ""));
+  if (!m) return undefined;
+  let n = parseFloat(m[1]);
+  const u = m[2].toUpperCase();
+  if (u === "K") n *= 1e3;
+  else if (u === "M") n *= 1e6;
+  else if (u === "B") n *= 1e9;
+  return Number.isFinite(n) ? Math.round(n) : undefined;
+}
+// Translate a Realtor/Zillow row into the canonical Courted-style keys the upsert reads,
+// so the scraper can POST each source's native columns. (Courted rows pass through.)
+function remapRow(raw: Row, source: string): Row {
+  if (source === "realtor") {
+    return {
+      "Name": raw["Name"], "First Name": raw["First Name"], "Last Name": raw["Last Name"],
+      "State License": raw["License Number"],
+      "Email": raw["Email"], "Phone": raw["Phone"], "Mobile Phone": raw["Mobile Phone"],
+      "Office": raw["Office"],
+      "Office City": raw["Office City"], "Office State": raw["Office State"], "Office Zip": raw["Office Postal"], "Office Address": raw["Office Address"],
+      "Years Of Experience": raw["Years Of Experience"],
+      "Agent Tenure (mos)": yearsToMos(raw["Years Of Experience"]),
+      "Active Listings": raw["For Sale Count"],
+      "Profile Photo URL": raw["Profile Photo URL"],
+    };
+  }
+  if (source === "zillow") {
+    return {
+      "Name": raw["Name"],
+      "State License": raw["License Number"],
+      "Email": raw["Email"], "Phone": raw["Phone"],
+      "Office": raw["Brokerage"], "Office Address": raw["Brokerage Address"],
+      "Office City": raw["City"], "Office State": raw["State"], "Office Zip": raw["Zip Code"],
+      "Years Of Experience": raw["Years of Experience"],
+      "Agent Tenure (mos)": yearsToMos(raw["Years of Experience"]),
+      "LTM Avg Sale Price": expandMoney(raw["Average Price"]),
+      "LTM Closed Transactions": raw["Sales Count Last Year"],
+      "Active Listings": raw["Active Listings Count"],
+      "Profile Photo URL": raw["Profile Photo URL"],
+    };
+  }
+  return raw; // courted: already canonical
+}
+
 function matchKey(license: string | null, email: string | null, phone: string | null, fullName: string | null, officeZip: string | null): [string, string] {
   if (license) return [`lic:${license.toLowerCase()}`, "high"];
   if (email) return [`email:${email.toLowerCase()}`, "high"];
@@ -74,7 +133,8 @@ export async function upsertAgentRows(client: PoolClient, rows: Row[], source: s
 
   await client.query("begin");
   try {
-    for (const r of rows) {
+    for (const _raw of rows) {
+      const r = remapRow(_raw, source);
       // ---- office ----
       const brand = txt(r["Brand"]);
       const officeName = txt(r["Custom Office Name"]) || txt(r["Office"]);
