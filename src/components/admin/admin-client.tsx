@@ -75,7 +75,7 @@ function DataWebhookTab() {
       </div>
       <ul className="list-disc space-y-1 pl-5 text-xs text-neutral-500">
         <li>Up to 2,000 rows per request — loop in batches for larger loads.</li>
-        <li>Rows use the Courted CSV column names. <code>source</code> can be courted | zillow | realtor.</li>
+        <li>Set <code>source</code> to courted | zillow | realtor. Send each source&apos;s own native CSV column names — the app maps Zillow/Realtor columns automatically.</li>
         <li>Idempotent: re-sending the same agents updates them (matched by license → email → phone).</li>
       </ul>
     </div>
