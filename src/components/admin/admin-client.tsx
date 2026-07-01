@@ -351,12 +351,17 @@ function UsersTab({ currentUserId }: { currentUserId: string }) {
 }
 
 // ---------- Activity ----------
+interface ActivityMeta {
+  failedIds?: string[];
+  retried?: boolean;
+}
 interface ActivityRow {
   id: string;
   action: string;
   performed_by: string | null;
   details: string | null;
   created_at: string;
+  meta: ActivityMeta | null;
 }
 const ACTION_TONE: Record<string, string> = {
   ingest: "bg-blue-100 text-blue-800",
@@ -367,6 +372,7 @@ const ACTION_TONE: Record<string, string> = {
 };
 function ActivityTab() {
   const [rows, setRows] = useState<ActivityRow[]>([]);
+  const [retrying, setRetrying] = useState<string | null>(null);
   const load = useCallback(async () => {
     const r = await fetch("/api/admin/activity");
     const j = await r.json();
@@ -375,6 +381,28 @@ function ActivityTab() {
   useEffect(() => {
     load();
   }, [load]);
+
+  async function retry(logId: string, count: number) {
+    if (!confirm(`Re-send the ${count} failed agent${count > 1 ? "s" : ""} to Clay? Already-sent agents won't be sent again.`)) return;
+    setRetrying(logId);
+    try {
+      const res = await fetch("/api/integrations/clay/retry", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ logId }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(j.error ?? "Retry failed");
+      } else {
+        toast.success(`Re-sent ${j.sent} agent${j.sent === 1 ? "" : "s"}${j.failed ? ` — ${j.failed} still failed` : ""}`);
+      }
+    } finally {
+      setRetrying(null);
+      load();
+    }
+  }
+
   return (
     <div className="overflow-hidden rounded-lg border border-neutral-200">
       <table className="w-full text-sm">
@@ -392,16 +420,35 @@ function ActivityTab() {
               <td colSpan={4} className="px-3 py-6 text-center text-neutral-400">No activity yet.</td>
             </tr>
           ) : (
-            rows.map((a) => (
-              <tr key={a.id} className="border-t border-neutral-100 align-top">
-                <td className="whitespace-nowrap px-3 py-2 text-neutral-500">{fmt(a.created_at)}</td>
-                <td className="px-3 py-2">
-                  <Badge className={ACTION_TONE[a.action] ?? "bg-neutral-100 text-neutral-700"}>{a.action}</Badge>
-                </td>
-                <td className="px-3 py-2 text-neutral-600">{a.performed_by ?? "—"}</td>
-                <td className="px-3 py-2 text-neutral-600">{a.details ?? "—"}</td>
-              </tr>
-            ))
+            rows.map((a) => {
+              const failedCount = a.meta?.failedIds?.length ?? 0;
+              const canRetry = a.action === "clay_send" && failedCount > 0 && !a.meta?.retried;
+              return (
+                <tr key={a.id} className="border-t border-neutral-100 align-top">
+                  <td className="whitespace-nowrap px-3 py-2 text-neutral-500">{fmt(a.created_at)}</td>
+                  <td className="px-3 py-2">
+                    <Badge className={ACTION_TONE[a.action] ?? "bg-neutral-100 text-neutral-700"}>{a.action}</Badge>
+                  </td>
+                  <td className="px-3 py-2 text-neutral-600">{a.performed_by ?? "—"}</td>
+                  <td className="px-3 py-2 text-neutral-600">
+                    <div className="flex items-start justify-between gap-3">
+                      <span>{a.details ?? "—"}</span>
+                      {canRetry && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-7 shrink-0 whitespace-nowrap px-2 text-xs"
+                          disabled={retrying === a.id}
+                          onClick={() => retry(a.id, failedCount)}
+                        >
+                          {retrying === a.id ? "Retrying…" : `Retry failed (${failedCount})`}
+                        </Button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              );
+            })
           )}
         </tbody>
       </table>

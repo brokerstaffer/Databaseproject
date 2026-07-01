@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { logAudit } from "@/lib/api/log-audit";
-import { orderedKeys, buildLabeledRow } from "@/lib/export/columns";
+import { orderedKeys } from "@/lib/export/columns";
 import { gatherExportRows } from "@/lib/export/gather-rows";
+import { sendRowsToClay, statusNote } from "@/lib/integrations/clay-send";
 
 export const maxDuration = 300;
 
@@ -35,54 +36,28 @@ export async function POST(req: NextRequest) {
 
   if (rows.length === 0) return NextResponse.json({ error: "No agents to send." }, { status: 400 });
 
-  // ---- post EACH agent to the client's Clay webhook as its own row ----
-  // Clay creates one row per webhook request. Clay rate-limits bursts, so we use gentle
-  // concurrency + retry-with-backoff on 429/5xx so rows aren't dropped.
-  const CONCURRENCY = 4;
-  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-  let sent = 0;
-  let failed = 0;
-  const statusCounts: Record<string, number> = {};
+  // ---- post each agent to the client's Clay webhook as its own row (>=5 req/sec, retried) ----
+  const { sent, failed, failedIds, statusCounts } = await sendRowsToClay(webhookUrl, rows, keys, { clientName, campaignId, campaignName });
+  const note = statusNote(statusCounts);
 
-  async function postOne(r: Record<string, unknown>): Promise<boolean> {
-    const body = JSON.stringify({
-      ...buildLabeledRow(r, keys),
-      Client: clientName,
-      "Campaign Id": campaignId,
-      "Campaign Name": campaignName,
+  // Recovery data so the Activity log can re-send ONLY the failed agents later.
+  const meta = { kind: "clay_send", clientId, campaignId, campaignName, source, columns: keys, failedIds };
+
+  if (sent === 0) {
+    await logAudit({
+      action: "clay_send",
+      performedBy: user.email ?? null,
+      details: `Sent 0 agents to ${client.name}'s Clay — all ${failed} failed${note}`,
+      meta,
     });
-    for (let attempt = 0; attempt < 4; attempt++) {
-      try {
-        const res = await fetch(webhookUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body });
-        if (res.ok) return true;
-        statusCounts[res.status] = (statusCounts[res.status] ?? 0) + 1;
-        if (res.status === 429 || res.status >= 500) {
-          await sleep(500 * 2 ** attempt); // 0.5s, 1s, 2s, 4s
-          continue;
-        }
-        return false; // other 4xx — don't retry
-      } catch {
-        await sleep(500 * 2 ** attempt);
-      }
-    }
-    return false;
+    return NextResponse.json({ error: `Clay webhook rejected all rows.${note}`, failed }, { status: 502 });
   }
-
-  for (let i = 0; i < rows.length; i += CONCURRENCY) {
-    const chunk = rows.slice(i, i + CONCURRENCY);
-    const oks = await Promise.all(chunk.map((r) => postOne(r as Record<string, unknown>)));
-    sent += oks.filter(Boolean).length;
-    failed += oks.filter((ok) => !ok).length;
-    if (i + CONCURRENCY < rows.length) await sleep(150); // gentle throttle between batches
-  }
-  const statusNote = Object.keys(statusCounts).length ? ` [statuses: ${Object.entries(statusCounts).map(([s, n]) => `${s}×${n}`).join(", ")}]` : "";
-
-  if (sent === 0) return NextResponse.json({ error: `Clay webhook rejected all rows.${statusNote}`, failed }, { status: 502 });
 
   await logAudit({
     action: "clay_send",
     performedBy: user.email ?? null,
-    details: `Sent ${sent} agents (one row each) to ${client.name}'s Clay${campaignName ? ` (campaign: ${campaignName})` : ""}${failed ? ` — ${failed} failed${statusNote}` : ""}`,
+    details: `Sent ${sent} agents (one row each) to ${client.name}'s Clay${campaignName ? ` (campaign: ${campaignName})` : ""}${failed ? ` — ${failed} failed${note}` : ""}`,
+    meta,
   });
   return NextResponse.json({ ok: true, sent, failed, client: client.name });
 }

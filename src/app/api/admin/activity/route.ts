@@ -7,7 +7,7 @@ export async function GET() {
   const admin = await requireAdmin();
   if (!admin) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const { rows } = await getPool().query(
-    "select id, action, performed_by, details, created_at from audit_logs order by created_at desc limit 200"
+    "select id, action, performed_by, details, created_at, meta from audit_logs order by created_at desc limit 200"
   );
   return NextResponse.json({ activity: rows });
 }
