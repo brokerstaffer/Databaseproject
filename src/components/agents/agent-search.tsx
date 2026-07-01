@@ -514,7 +514,7 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
         </div>
       </div>
 
-      <ExportDialog open={exportOpen} onOpenChange={setExportOpen} filters={filters} total={total} selectedIds={Array.from(selected)} source={source} />
+      <ExportDialog open={exportOpen} onOpenChange={setExportOpen} filters={filters} total={total} selectedIds={Array.from(selected)} source={source} mode={mode} />
       <EditColumnsModal
         open={editOpen}
         onOpenChange={setEditOpen}

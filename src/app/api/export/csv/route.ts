@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { createAdminClient } from "@/lib/supabase/admin";
-import { getPool } from "@/lib/db/pool";
 import { logAudit } from "@/lib/api/log-audit";
 import { EXPORT_COLUMNS, EXPORT_VALUE, orderedKeys } from "@/lib/export/columns";
+import { gatherExportRows } from "@/lib/export/gather-rows";
 
 export const maxDuration = 300;
 
@@ -28,31 +27,13 @@ export async function POST(req: NextRequest) {
   const labelByKey = Object.fromEntries(EXPORT_COLUMNS.map((c) => [c.key, c.label]));
 
   let rows: Row[] = [];
-  if (Array.isArray(selectedIds) && selectedIds.length > 0) {
-    const { rows: r } = await getPool().query(
-      `select a.*, (select jsonb_agg(jsonb_build_object('code', m.code, 'member_id', am.mls_member_id))
-         from agent_mls am join mls m on m.id = am.mls_id where am.agent_id = a.id) as mls
-       from agents a where a.id = any($1::uuid[]) order by a.sales_volume desc nulls last`,
-      [selectedIds]
-    );
-    rows = r;
-  } else {
-    const from = Number(rangeFrom) > 0 ? Number(rangeFrom) : 1;
-    const to = Number(rangeTo) > 0 ? Number(rangeTo) : null;
-    const limit = to ? to - from + 1 : 100000;
-    const admin = createAdminClient();
-    const { data, error } = await admin.rpc("fn_filter_search", {
-      p_mode: mode,
-      p_source: source,
-      p_filters: filters,
-      p_sort_by: "sales_volume",
-      p_sort_dir: "desc",
-      p_limit: Math.min(limit, 100000),
-      p_offset: Math.max(from - 1, 0),
-    });
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    rows = (data?.data ?? []) as Row[];
+  try {
+    rows = (await gatherExportRows({ mode, source, filters, selectedIds, rangeFrom, rangeTo })) as Row[];
+  } catch (e) {
+    return NextResponse.json({ error: e instanceof Error ? e.message : "Failed to gather agents" }, { status: 500 });
   }
+
+  if (rows.length === 0) return NextResponse.json({ error: "No agents match — nothing to export." }, { status: 400 });
 
   const header = keys.map((k) => esc(labelByKey[k])).join(",");
   const lines = rows.map((r) => keys.map((k) => esc(EXPORT_VALUE[k]?.(r))).join(","));

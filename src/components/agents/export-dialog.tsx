@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import type { Filters } from "@/types/agent-filters";
-import type { DataSource } from "@/types/agent";
+import type { DataSource, SearchMode } from "@/types/agent";
 import { EXPORT_COLUMNS } from "@/lib/export/columns";
 
 interface ClientOpt {
@@ -33,6 +33,7 @@ export function ExportDialog({
   total,
   selectedIds,
   source,
+  mode = "agent",
 }: {
   open: boolean;
   onOpenChange: (o: boolean) => void;
@@ -40,6 +41,7 @@ export function ExportDialog({
   total: number;
   selectedIds: string[];
   source: DataSource;
+  mode?: SearchMode;
 }) {
   const [method, setMethod] = useState<"clay" | "csv">("clay");
   const [clients, setClients] = useState<ClientOpt[]>([]);
@@ -71,10 +73,23 @@ export function ExportDialog({
   }, [clientId]);
 
   const selectedClient = clients.find((c) => c.id === clientId);
-  const scope =
-    selectedIds.length > 0 ? `${selectedIds.length} selected` : from || to ? `rows ${from || 1}–${to || total}` : `all ${total.toLocaleString()}`;
+  // In Office mode the export is "all agents belonging to the chosen offices".
+  const office = mode === "office";
+  const hasSel = selectedIds.length > 0;
+  const scope = hasSel
+    ? office
+      ? `all agents in ${selectedIds.length} selected office${selectedIds.length > 1 ? "s" : ""}`
+      : `${selectedIds.length} selected agents`
+    : from || to
+    ? office
+      ? `all agents in offices ranked ${from || 1}–${to || total}`
+      : `agents ${from || 1}–${to || total}`
+    : office
+    ? `all agents in the ${total.toLocaleString()} matching offices`
+    : `all ${total.toLocaleString()} agents`;
 
   const reqBody = () => ({
+    mode,
     source,
     filters,
     selectedIds: selectedIds.length ? selectedIds : undefined,
@@ -238,17 +253,18 @@ export function ExportDialog({
           {/* range */}
           <div>
             <label className="text-sm font-medium text-neutral-700">
-              Range <span className="font-normal text-neutral-400">(blank = all filtered)</span>
+              Range{" "}
+              <span className="font-normal text-neutral-400">{hasSel ? "(ignored — rows are selected)" : "(blank = all filtered)"}</span>
             </label>
             <div className="mt-1 flex items-center gap-2">
-              <Input value={from} onChange={(e) => setFrom(e.target.value)} placeholder="From" inputMode="numeric" />
+              <Input value={from} onChange={(e) => setFrom(e.target.value)} placeholder="From" inputMode="numeric" disabled={hasSel} />
               <span className="text-neutral-400">–</span>
-              <Input value={to} onChange={(e) => setTo(e.target.value)} placeholder="To" inputMode="numeric" />
+              <Input value={to} onChange={(e) => setTo(e.target.value)} placeholder="To" inputMode="numeric" disabled={hasSel} />
             </div>
           </div>
 
           <p className="text-xs text-neutral-500">
-            Exporting: <span className="font-medium text-neutral-700">{scope}</span> agents · {cols.size} columns
+            Exporting: <span className="font-medium text-neutral-700">{scope}</span> · {cols.size} columns
           </p>
         </div>
         <DialogFooter>
