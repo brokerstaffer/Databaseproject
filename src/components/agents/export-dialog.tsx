@@ -20,6 +20,7 @@ interface ClientOpt {
 interface Campaign {
   id: string;
   bison_campaign_id: string;
+  bison_id: string; // EmailBison's numeric campaign id (what Clay expects)
   name: string | null;
   status: string | null;
 }
@@ -119,7 +120,7 @@ export function ExportDialog({
     const res = await fetch("/api/integrations/clay/send", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...reqBody(), clientId, campaignId: campaign?.bison_campaign_id ?? null, campaignName: campaign?.name ?? null }),
+      body: JSON.stringify({ ...reqBody(), clientId, campaignId: campaign?.bison_id ?? null, campaignName: campaign?.name ?? null }),
     });
     setBusy(false);
     const j = await res.json().catch(() => ({}));

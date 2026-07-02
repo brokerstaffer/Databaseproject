@@ -13,7 +13,9 @@ export async function GET(req: NextRequest) {
   if (!client) return NextResponse.json({ campaigns: [] });
 
   const { rows } = await pool.query(
-    `select id, bison_campaign_id, name, status
+    // bison_id = EmailBison's numeric campaign id (raw.id, e.g. 67) — the id Clay/Bison expects.
+    // bison_campaign_id stays the internal UUID key; fall back to it only if raw.id is absent.
+    `select id, bison_campaign_id, coalesce(raw->>'id', bison_campaign_id) as bison_id, name, status
        from bison_campaigns
       where lower(trim(split_part(name, ' + ', 1))) = lower(trim($1))
          or lower(name) like lower(trim($1)) || ' +%'
