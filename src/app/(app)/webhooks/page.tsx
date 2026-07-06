@@ -177,12 +177,14 @@ export default function WebhooksPage() {
               <Input value={hook} onChange={(e) => setHook(e.target.value)} placeholder="https://api.clay.com/…/webhook" className="mt-1" />
             </div>
             <div>
-              <label className="text-sm font-medium text-neutral-700">EmailBison API key</label>
+              <label className="text-sm font-medium text-neutral-700">
+                EmailBison API key <span className="font-normal text-neutral-400">(optional — the shared workspace key from the server env is used)</span>
+              </label>
               <Input
                 value={key}
                 onChange={(e) => setKey(e.target.value)}
                 type="password"
-                placeholder={editing ? "Leave blank to keep current" : "Bison API key"}
+                placeholder={editing ? "Leave blank to keep current" : "Optional — set BISON_API_KEY in env instead"}
                 className="mt-1"
               />
             </div>

@@ -215,6 +215,77 @@ export function RangePopover({
   );
 }
 
+// ---------- Client (orchestrator client — narrows to the agents built for that client) ----------
+interface OrchClient {
+  id: string;
+  client_name: string | null;
+  status: string | null;
+  lead_count: number;
+}
+
+export function ClientPopover({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [sel, setSel] = useState(value);
+  const [clients, setClients] = useState<OrchClient[] | null>(null);
+
+  useEffect(() => {
+    if (open) {
+      setSel(value);
+      if (clients === null) {
+        fetch("/api/orch/clients")
+          .then((r) => r.json())
+          .then((j) => setClients(j.clients ?? []))
+          .catch(() => setClients([]));
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  return (
+    <FilterPopoverShell
+      label="Client"
+      count={value ? 1 : 0}
+      open={open}
+      onOpenChange={setOpen}
+      width="w-80"
+      onClear={() => setSel("")}
+      onApply={() => {
+        onChange(sel);
+        setOpen(false);
+      }}
+    >
+      <div className="max-h-64 space-y-1 overflow-auto">
+        {clients === null ? (
+          <p className="py-4 text-center text-sm text-neutral-400">Loading…</p>
+        ) : clients.length === 0 ? (
+          <p className="py-4 text-center text-sm text-neutral-400">No clients yet.</p>
+        ) : (
+          clients.map((c) => {
+            const on = sel === c.id;
+            return (
+              <button
+                key={c.id}
+                type="button"
+                onClick={() => setSel(on ? "" : c.id)}
+                className={cn(
+                  "flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm",
+                  on ? "bg-neutral-100 text-neutral-900" : "text-neutral-800 hover:bg-neutral-50"
+                )}
+              >
+                <span className={cn("flex h-4 w-4 shrink-0 items-center justify-center rounded-full border", on ? "border-neutral-900" : "border-neutral-300")}>
+                  {on && <span className="h-2 w-2 rounded-full bg-neutral-900" />}
+                </span>
+                <span className="min-w-0 flex-1 truncate">{c.client_name ?? "Unnamed client"}</span>
+                <span className="shrink-0 text-xs text-neutral-400">{c.lead_count.toLocaleString()} leads</span>
+              </button>
+            );
+          })
+        )}
+      </div>
+    </FilterPopoverShell>
+  );
+}
+
 // ---------- Title (include/exclude over the 3 fixed roles) ----------
 export function TitlePopover({ value, onChange }: { value: IncludeExclude; onChange: (v: IncludeExclude) => void }) {
   const [open, setOpen] = useState(false);

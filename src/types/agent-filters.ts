@@ -45,6 +45,7 @@ export interface Filters {
   license: IncludeExclude; // license numbers
   name: IncludeExclude; // full names (include/exclude)
   nameQuery: string; // free-text name search (top search bar)
+  orchClientId: string; // orchestrator client (orch_clients.id) — "" = off
 }
 
 export const DEFAULT_FILTERS: Filters = {
@@ -63,6 +64,7 @@ export const DEFAULT_FILTERS: Filters = {
   license: { include: [], exclude: [] },
   name: { include: [], exclude: [] },
   nameQuery: "",
+  orchClientId: "",
 };
 
 // Bucket sets: { key } is sent to the RPC (must match fn_bucket_cond); { label } is displayed.

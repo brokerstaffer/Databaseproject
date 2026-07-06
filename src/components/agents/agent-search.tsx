@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import type { Agent, SearchResponse, SortDir, SearchMode, DataSource } from "@/types/agent";
-import { RangePopover, TitlePopover } from "./agent-filters";
+import { RangePopover, TitlePopover, ClientPopover } from "./agent-filters";
 import { LocationPopover, OfficeSearchPopover, MlsPopover, LicensePopover, NamePopover } from "./agent-typeahead-filters";
 import { ExportDialog } from "./export-dialog";
 import { SavedViews } from "./saved-views";
@@ -207,7 +207,8 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
     rangeCount(filters.avgSalePrice) +
     rangeCount(filters.estTimeInOffice) +
     rangeCount(filters.avgTimeAtOffice) +
-    ieCount(filters.name);
+    ieCount(filters.name) +
+    (filters.orchClientId ? 1 : 0);
   // The top-bar search is a find/highlight tool, not a filter — so it does not count here.
 
   function setF<K extends keyof Filters>(k: K, v: Filters[K]) {
@@ -334,6 +335,7 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
               </button>
             </span>
           )}
+          <ClientPopover value={filters.orchClientId} onChange={(v) => setF("orchClientId", v)} />
           <LocationPopover value={filters.location} onChange={(v) => setF("location", v)} />
           <RangePopover label="Sales volume" hasSide prefix="$" buckets={SALES_VOLUME_BUCKETS} value={filters.salesVolume} onChange={(v) => setF("salesVolume", v)} />
           <OfficeSearchPopover value={filters.officeSearch} onChange={(v) => setF("officeSearch", v)} />
@@ -388,7 +390,7 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
             <SavedViews
               filters={filters}
               onLoad={(f) => {
-                setFilters(f);
+                setFilters({ ...DEFAULT_FILTERS, ...f }); // older saved views may predate newer filter keys
                 setNameSearch(f.nameQuery ?? ""); // keep the top-bar search box in sync with the loaded view
                 setPage(1);
               }}
