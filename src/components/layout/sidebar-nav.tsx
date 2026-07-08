@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Users, Database, FileDown, Webhook, Shield, LogOut } from "lucide-react";
+import { Users, Database, FileDown, Building2, Shield, LogOut } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { hasPermission } from "@/types/auth";
 import type { UserRole } from "@/types/auth";
@@ -12,7 +12,7 @@ const NAV = [
   { title: "Agent Search", href: "/search", icon: Users, minRole: "viewer" as UserRole },
   { title: "Import", href: "/import", icon: Database, minRole: "manager" as UserRole },
   { title: "Export", href: "/export", icon: FileDown, minRole: "manager" as UserRole },
-  { title: "Webhooks", href: "/webhooks", icon: Webhook, minRole: "admin" as UserRole },
+  { title: "Clients", href: "/webhooks", icon: Building2, minRole: "admin" as UserRole },
 ];
 
 export function SidebarNav({ role }: { role: UserRole }) {

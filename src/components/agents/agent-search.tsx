@@ -384,7 +384,7 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
             <button type="button" title="Edit columns" onClick={() => setEditOpen(true)} className="rounded-md p-2 text-neutral-500 hover:bg-neutral-100">
               <SlidersHorizontal className="h-[18px] w-[18px]" />
             </button>
-            <button type="button" title="Export — Send to Clay" onClick={() => setExportOpen(true)} className="rounded-md p-2 text-neutral-500 hover:bg-neutral-100">
+            <button type="button" title="Export — Send to campaign / CSV" onClick={() => setExportOpen(true)} className="rounded-md p-2 text-neutral-500 hover:bg-neutral-100">
               <Download className="h-[18px] w-[18px]" />
             </button>
             <SavedViews

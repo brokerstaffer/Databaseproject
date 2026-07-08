@@ -15,12 +15,11 @@ import { EXPORT_COLUMNS } from "@/lib/export/columns";
 interface ClientOpt {
   id: string;
   name: string;
-  clay_webhook_url: string | null;
 }
 interface Campaign {
   id: string;
   bison_campaign_id: string;
-  bison_id: string; // EmailBison's numeric campaign id (what Clay expects)
+  bison_id: string; // EmailBison's numeric campaign id
   name: string | null;
   status: string | null;
 }
@@ -44,7 +43,7 @@ export function ExportDialog({
   source: DataSource;
   mode?: SearchMode;
 }) {
-  const [method, setMethod] = useState<"clay" | "csv">("clay");
+  const [method, setMethod] = useState<"campaign" | "csv">("campaign");
   const [clients, setClients] = useState<ClientOpt[]>([]);
   const [clientId, setClientId] = useState("");
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
@@ -73,7 +72,6 @@ export function ExportDialog({
     }
   }, [clientId]);
 
-  const selectedClient = clients.find((c) => c.id === clientId);
   // In Office mode the export is "all agents belonging to the chosen offices".
   const office = mode === "office";
   const hasSel = selectedIds.length > 0;
@@ -96,7 +94,6 @@ export function ExportDialog({
     selectedIds: selectedIds.length ? selectedIds : undefined,
     rangeFrom: from || undefined,
     rangeTo: to || undefined,
-    columns: [...cols],
   });
   const toggleCol = (k: string) =>
     setCols((s) => {
@@ -106,26 +103,29 @@ export function ExportDialog({
       return n;
     });
 
-  async function sendClay() {
+  // Send to campaign: queues the agents as an enrichment batch. The enrich-worker finds and
+  // verifies an email for each (cached results reused), skips leads already in one of this
+  // client's campaigns, and pushes the rest into the chosen EmailBison campaign.
+  async function sendCampaign() {
     if (!clientId) {
       toast.error("Select a client");
       return;
     }
-    if (cols.size === 0) {
-      toast.error("Select at least one column");
+    const campaign = campaigns.find((c) => c.id === campaignId);
+    if (!campaign) {
+      toast.error("Select a campaign");
       return;
     }
     setBusy(true);
-    const campaign = campaigns.find((c) => c.id === campaignId);
-    const res = await fetch("/api/integrations/clay/send", {
+    const res = await fetch("/api/enrichment/send", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...reqBody(), clientId, campaignId: campaign?.bison_id ?? null, campaignName: campaign?.name ?? null }),
+      body: JSON.stringify({ ...reqBody(), clientId, campaignId: campaign.bison_id, campaignName: campaign.name ?? null }),
     });
     setBusy(false);
     const j = await res.json().catch(() => ({}));
     if (res.ok) {
-      toast.success(`Sent ${j.sent} agents (one row each) to ${j.client}'s Clay${j.failed ? ` — ${j.failed} failed` : ""}`);
+      toast.success(`Queued ${j.queued} agents — enriching now, then into “${campaign.name}”. Track progress in Admin → Activity.`, { duration: 8000 });
       onOpenChange(false);
     } else {
       toast.error(j.error ?? "Send failed");
@@ -139,7 +139,11 @@ export function ExportDialog({
     }
     setBusy(true);
     try {
-      const res = await fetch("/api/export/csv", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(reqBody()) });
+      const res = await fetch("/api/export/csv", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...reqBody(), columns: [...cols] }),
+      });
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
         toast.error(j.error ?? "CSV export failed");
@@ -170,7 +174,7 @@ export function ExportDialog({
           <div>
             <label className="text-sm font-medium text-neutral-700">Method</label>
             <div className="mt-1.5 grid grid-cols-2 gap-2">
-              {([["clay", "Send to Clay"], ["csv", "Download CSV"]] as const).map(([m, lbl]) => (
+              {([["campaign", "Send to campaign"], ["csv", "Download CSV"]] as const).map(([m, lbl]) => (
                 <button
                   key={m}
                   type="button"
@@ -186,8 +190,8 @@ export function ExportDialog({
             </div>
           </div>
 
-          {/* clay options */}
-          {method === "clay" && (
+          {/* campaign options */}
+          {method === "campaign" && (
             <>
               <div>
                 <label className="text-sm font-medium text-neutral-700">Client</label>
@@ -203,10 +207,7 @@ export function ExportDialog({
                     ))}
                   </SelectContent>
                 </Select>
-                {selectedClient && !selectedClient.clay_webhook_url && (
-                  <p className="mt-1 text-xs text-red-600">This client has no Clay webhook — add one on the Webhooks page.</p>
-                )}
-                {clients.length === 0 && <p className="mt-1 text-xs text-neutral-500">No clients yet — add one on the Webhooks page.</p>}
+                {clients.length === 0 && <p className="mt-1 text-xs text-neutral-500">No clients yet — add one on the Clients page.</p>}
               </div>
               <div>
                 <label className="text-sm font-medium text-neutral-700">EmailBison campaign</label>
@@ -223,33 +224,39 @@ export function ExportDialog({
                   </SelectContent>
                 </Select>
               </div>
+              <p className="text-xs text-neutral-500">
+                Each agent is enriched (email found + verified), leads already in this client’s campaigns are skipped, and the rest are
+                uploaded into the campaign with all custom variables.
+              </p>
             </>
           )}
 
-          {/* columns */}
-          <div>
-            <div className="flex items-center justify-between">
-              <label className="text-sm font-medium text-neutral-700">
-                Columns <span className="font-normal text-neutral-400">({cols.size}/{ALL_KEYS.length})</span>
-              </label>
-              <div className="flex gap-3 text-xs">
-                <button type="button" className="text-neutral-600 hover:underline" onClick={() => setCols(new Set(ALL_KEYS))}>
-                  Select all
-                </button>
-                <button type="button" className="text-neutral-600 hover:underline" onClick={() => setCols(new Set())}>
-                  Clear
-                </button>
+          {/* columns — CSV only; campaign sends build their own variables */}
+          {method === "csv" && (
+            <div>
+              <div className="flex items-center justify-between">
+                <label className="text-sm font-medium text-neutral-700">
+                  Columns <span className="font-normal text-neutral-400">({cols.size}/{ALL_KEYS.length})</span>
+                </label>
+                <div className="flex gap-3 text-xs">
+                  <button type="button" className="text-neutral-600 hover:underline" onClick={() => setCols(new Set(ALL_KEYS))}>
+                    Select all
+                  </button>
+                  <button type="button" className="text-neutral-600 hover:underline" onClick={() => setCols(new Set())}>
+                    Clear
+                  </button>
+                </div>
+              </div>
+              <div className="mt-1.5 grid max-h-48 grid-cols-2 gap-x-4 gap-y-1.5 overflow-auto rounded-lg border border-neutral-200 p-3">
+                {EXPORT_COLUMNS.map((c) => (
+                  <label key={c.key} className="flex items-center gap-2 text-sm text-neutral-800">
+                    <Checkbox checked={cols.has(c.key)} onCheckedChange={() => toggleCol(c.key)} />
+                    <span className="truncate">{c.label}</span>
+                  </label>
+                ))}
               </div>
             </div>
-            <div className="mt-1.5 grid max-h-48 grid-cols-2 gap-x-4 gap-y-1.5 overflow-auto rounded-lg border border-neutral-200 p-3">
-              {EXPORT_COLUMNS.map((c) => (
-                <label key={c.key} className="flex items-center gap-2 text-sm text-neutral-800">
-                  <Checkbox checked={cols.has(c.key)} onCheckedChange={() => toggleCol(c.key)} />
-                  <span className="truncate">{c.label}</span>
-                </label>
-              ))}
-            </div>
-          </div>
+          )}
 
           {/* range */}
           <div>
@@ -265,16 +272,17 @@ export function ExportDialog({
           </div>
 
           <p className="text-xs text-neutral-500">
-            Exporting: <span className="font-medium text-neutral-700">{scope}</span> · {cols.size} columns
+            {method === "campaign" ? "Sending" : "Exporting"}: <span className="font-medium text-neutral-700">{scope}</span>
+            {method === "csv" ? ` · ${cols.size} columns` : ""}
           </p>
         </div>
         <DialogFooter>
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          {method === "clay" ? (
-            <Button onClick={sendClay} disabled={busy || !clientId}>
-              {busy ? "Sending…" : "Send to Clay"}
+          {method === "campaign" ? (
+            <Button onClick={sendCampaign} disabled={busy || !clientId || !campaignId}>
+              {busy ? "Queueing…" : "Send to campaign"}
             </Button>
           ) : (
             <Button onClick={downloadCsv} disabled={busy}>

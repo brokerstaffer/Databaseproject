@@ -10,18 +10,19 @@ import { toast } from "sonner";
 interface ClientRow {
   id: string;
   name: string;
-  clay_webhook_url: string | null;
   bison_key_set: boolean;
   bison_synced_at: string | null;
 }
 
-export default function WebhooksPage() {
+// Clients page (route kept at /webhooks). Clay is retired — a client is just a name that
+// matches its EmailBison campaigns by prefix ("Client Name + Sender + Market"); sends go
+// through the in-house enrichment pipeline.
+export default function ClientsPage() {
   const [clients, setClients] = useState<ClientRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<ClientRow | null>(null);
   const [name, setName] = useState("");
-  const [hook, setHook] = useState("");
   const [key, setKey] = useState("");
   const [saving, setSaving] = useState(false);
   const [syncing, setSyncing] = useState(false);
@@ -57,14 +58,12 @@ export default function WebhooksPage() {
   function openNew() {
     setEditing(null);
     setName("");
-    setHook("");
     setKey("");
     setOpen(true);
   }
   function openEdit(c: ClientRow) {
     setEditing(c);
     setName(c.name);
-    setHook(c.clay_webhook_url ?? "");
     setKey("");
     setOpen(true);
   }
@@ -75,7 +74,7 @@ export default function WebhooksPage() {
       return;
     }
     setSaving(true);
-    const payload = { name, clay_webhook_url: hook, bison_api_key: key };
+    const payload = { name, bison_api_key: key };
     const res = editing
       ? await fetch(`/api/clients/${editing.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) })
       : await fetch("/api/clients", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
@@ -104,7 +103,13 @@ export default function WebhooksPage() {
   return (
     <div className="flex h-full flex-col gap-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold tracking-tight text-neutral-900">Webhooks</h1>
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight text-neutral-900">Clients</h1>
+          <p className="mt-0.5 text-sm text-neutral-500">
+            A client’s campaigns are matched by name: “Client Name + Sender + Market”. Sends enrich each agent, skip leads already in the
+            client’s campaigns, then upload to EmailBison.
+          </p>
+        </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" onClick={syncCampaigns} disabled={syncing} className="gap-1.5">
             {syncing ? "Syncing…" : "Sync campaigns"}
@@ -121,31 +126,31 @@ export default function WebhooksPage() {
           <thead className="border-b border-neutral-200 text-left text-xs font-medium text-neutral-500">
             <tr>
               <th className="px-4 py-3">Client</th>
-              <th className="px-4 py-3">Clay webhook</th>
               <th className="px-4 py-3">Bison key</th>
-              <th className="px-4 py-3">Last synced</th>
+              <th className="px-4 py-3">Campaigns last synced</th>
               <th className="px-4 py-3" />
             </tr>
           </thead>
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={5} className="py-12 text-center text-neutral-400">
+                <td colSpan={4} className="py-12 text-center text-neutral-400">
                   Loading…
                 </td>
               </tr>
             ) : clients.length === 0 ? (
               <tr>
-                <td colSpan={5} className="py-12 text-center text-neutral-400">
-                  No clients yet. Add one to start sending lists to Clay.
+                <td colSpan={4} className="py-12 text-center text-neutral-400">
+                  No clients yet. Add one to start sending campaigns.
                 </td>
               </tr>
             ) : (
               clients.map((c) => (
                 <tr key={c.id} className="border-b border-neutral-100">
                   <td className="px-4 py-3 font-medium text-neutral-900">{c.name}</td>
-                  <td className="max-w-xs truncate px-4 py-3 text-neutral-600">{c.clay_webhook_url ?? <span className="text-neutral-400">—</span>}</td>
-                  <td className="px-4 py-3">{c.bison_key_set ? <span className="text-emerald-600">Set</span> : <span className="text-neutral-400">Not set</span>}</td>
+                  <td className="px-4 py-3">
+                    {c.bison_key_set ? <span className="text-emerald-600">Set</span> : <span className="text-neutral-400">Workspace key (env)</span>}
+                  </td>
                   <td className="px-4 py-3 text-neutral-600">{c.bison_synced_at ? new Date(c.bison_synced_at).toLocaleString() : "—"}</td>
                   <td className="px-4 py-3 text-right">
                     <button onClick={() => openEdit(c)} className="mr-3 text-neutral-500 hover:text-neutral-900">
@@ -171,10 +176,7 @@ export default function WebhooksPage() {
             <div>
               <label className="text-sm font-medium text-neutral-700">Client name</label>
               <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Properties RE" className="mt-1" />
-            </div>
-            <div>
-              <label className="text-sm font-medium text-neutral-700">Clay webhook URL</label>
-              <Input value={hook} onChange={(e) => setHook(e.target.value)} placeholder="https://api.clay.com/…/webhook" className="mt-1" />
+              <p className="mt-1 text-xs text-neutral-500">Must match the first part of the client’s EmailBison campaign names.</p>
             </div>
             <div>
               <label className="text-sm font-medium text-neutral-700">

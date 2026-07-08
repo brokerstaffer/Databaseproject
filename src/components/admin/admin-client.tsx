@@ -351,52 +351,75 @@ function UsersTab({ currentUserId }: { currentUserId: string }) {
 }
 
 // ---------- Activity ----------
-interface ActivityMeta {
-  failedIds?: string[];
-  retried?: boolean;
-}
 interface ActivityRow {
   id: string;
   action: string;
   performed_by: string | null;
   details: string | null;
   created_at: string;
-  meta: ActivityMeta | null;
 }
 const ACTION_TONE: Record<string, string> = {
   ingest: "bg-blue-100 text-blue-800",
   clay_send: "bg-purple-100 text-purple-800",
+  enrichment_send: "bg-purple-100 text-purple-800",
+  enrichment_retry: "bg-amber-100 text-amber-800",
   api_key_created: "bg-green-100 text-green-800",
   api_key_revoked: "bg-red-100 text-red-800",
   user_deleted: "bg-red-100 text-red-800",
 };
+
+// Campaign sends: live progress of enrichment batches (enrich -> dedup -> EmailBison).
+interface BatchRow {
+  id: string;
+  status: string;
+  campaign_name: string | null;
+  client_name: string | null;
+  total: number;
+  enriched: number;
+  no_email: number;
+  sent: number;
+  failed: number;
+  skipped: number;
+  created_at: string;
+  finished_at: string | null;
+}
+const BATCH_TONE: Record<string, string> = {
+  queued: "bg-neutral-100 text-neutral-700",
+  running: "bg-blue-100 text-blue-800",
+  done: "bg-green-100 text-green-800",
+  cancelled: "bg-neutral-100 text-neutral-500",
+};
+
 function ActivityTab() {
   const [rows, setRows] = useState<ActivityRow[]>([]);
+  const [batches, setBatches] = useState<BatchRow[]>([]);
   const [retrying, setRetrying] = useState<string | null>(null);
+
   const load = useCallback(async () => {
-    const r = await fetch("/api/admin/activity");
-    const j = await r.json();
-    setRows(j.activity ?? []);
+    const [a, b] = await Promise.all([fetch("/api/admin/activity"), fetch("/api/enrichment/batches")]);
+    const aj = await a.json().catch(() => ({}));
+    const bj = await b.json().catch(() => ({}));
+    setRows(aj.activity ?? []);
+    setBatches(bj.batches ?? []);
   }, []);
   useEffect(() => {
     load();
+    const t = setInterval(load, 5000); // keep progress live while a batch is running
+    return () => clearInterval(t);
   }, [load]);
 
-  async function retry(logId: string, count: number) {
-    if (!confirm(`Re-send the ${count} failed agent${count > 1 ? "s" : ""} to Clay? Already-sent agents won't be sent again.`)) return;
-    setRetrying(logId);
+  async function retryBatch(b: BatchRow) {
+    if (!confirm(`Re-queue the ${b.failed} failed agent${b.failed > 1 ? "s" : ""}? Sent and skipped agents are never re-sent.`)) return;
+    setRetrying(b.id);
     try {
-      const res = await fetch("/api/integrations/clay/retry", {
+      const res = await fetch("/api/enrichment/retry", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ logId }),
+        body: JSON.stringify({ batchId: b.id }),
       });
       const j = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        toast.error(j.error ?? "Retry failed");
-      } else {
-        toast.success(`Re-sent ${j.sent} agent${j.sent === 1 ? "" : "s"}${j.failed ? ` — ${j.failed} still failed` : ""}`);
-      }
+      if (!res.ok) toast.error(j.error ?? "Retry failed");
+      else toast.success(`Re-queued ${j.retried} agent${j.retried === 1 ? "" : "s"} — the worker is on it`);
     } finally {
       setRetrying(null);
       load();
@@ -404,54 +427,96 @@ function ActivityTab() {
   }
 
   return (
-    <div className="overflow-hidden rounded-lg border border-neutral-200">
-      <table className="w-full text-sm">
-        <thead className="bg-neutral-50 text-left text-xs font-medium text-neutral-500">
-          <tr>
-            <th className="px-3 py-2">When</th>
-            <th className="px-3 py-2">Action</th>
-            <th className="px-3 py-2">By</th>
-            <th className="px-3 py-2">Details</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.length === 0 ? (
-            <tr>
-              <td colSpan={4} className="px-3 py-6 text-center text-neutral-400">No activity yet.</td>
-            </tr>
-          ) : (
-            rows.map((a) => {
-              const failedCount = a.meta?.failedIds?.length ?? 0;
-              const canRetry = a.action === "clay_send" && failedCount > 0 && !a.meta?.retried;
-              return (
-                <tr key={a.id} className="border-t border-neutral-100 align-top">
-                  <td className="whitespace-nowrap px-3 py-2 text-neutral-500">{fmt(a.created_at)}</td>
-                  <td className="px-3 py-2">
-                    <Badge className={ACTION_TONE[a.action] ?? "bg-neutral-100 text-neutral-700"}>{a.action}</Badge>
-                  </td>
-                  <td className="px-3 py-2 text-neutral-600">{a.performed_by ?? "—"}</td>
-                  <td className="px-3 py-2 text-neutral-600">
-                    <div className="flex items-start justify-between gap-3">
-                      <span>{a.details ?? "—"}</span>
-                      {canRetry && (
+    <div className="space-y-5">
+      <div>
+        <div className="mb-2 text-sm font-semibold text-neutral-800">Campaign sends</div>
+        <div className="overflow-hidden rounded-lg border border-neutral-200">
+          <table className="w-full text-sm">
+            <thead className="bg-neutral-50 text-left text-xs font-medium text-neutral-500">
+              <tr>
+                <th className="px-3 py-2">When</th>
+                <th className="px-3 py-2">Client</th>
+                <th className="px-3 py-2">Campaign</th>
+                <th className="px-3 py-2">Progress</th>
+                <th className="px-3 py-2">Status</th>
+                <th className="px-3 py-2" />
+              </tr>
+            </thead>
+            <tbody>
+              {batches.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="px-3 py-6 text-center text-neutral-400">No campaign sends yet.</td>
+                </tr>
+              ) : (
+                batches.map((b) => (
+                  <tr key={b.id} className="border-t border-neutral-100 align-top">
+                    <td className="whitespace-nowrap px-3 py-2 text-neutral-500">{fmt(b.created_at)}</td>
+                    <td className="px-3 py-2 text-neutral-800">{b.client_name ?? "—"}</td>
+                    <td className="max-w-56 truncate px-3 py-2 text-neutral-600">{b.campaign_name ?? "(enrich only)"}</td>
+                    <td className="whitespace-nowrap px-3 py-2 text-neutral-600">
+                      <span className="font-medium text-green-700">{b.sent} sent</span>
+                      {b.skipped > 0 && <span> · {b.skipped} skipped</span>}
+                      {b.no_email > 0 && <span> · {b.no_email} no email</span>}
+                      {b.failed > 0 && <span className="text-red-600"> · {b.failed} failed</span>}
+                      <span className="text-neutral-400"> / {b.total}</span>
+                    </td>
+                    <td className="px-3 py-2">
+                      <Badge className={BATCH_TONE[b.status] ?? "bg-neutral-100 text-neutral-700"}>{b.status}</Badge>
+                    </td>
+                    <td className="px-3 py-2 text-right">
+                      {b.failed > 0 && b.status === "done" && (
                         <Button
                           size="sm"
                           variant="outline"
                           className="h-7 shrink-0 whitespace-nowrap px-2 text-xs"
-                          disabled={retrying === a.id}
-                          onClick={() => retry(a.id, failedCount)}
+                          disabled={retrying === b.id}
+                          onClick={() => retryBatch(b)}
                         >
-                          {retrying === a.id ? "Retrying…" : `Retry failed (${failedCount})`}
+                          {retrying === b.id ? "Retrying…" : `Retry failed (${b.failed})`}
                         </Button>
                       )}
-                    </div>
-                  </td>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div>
+        <div className="mb-2 text-sm font-semibold text-neutral-800">All activity</div>
+        <div className="overflow-hidden rounded-lg border border-neutral-200">
+          <table className="w-full text-sm">
+            <thead className="bg-neutral-50 text-left text-xs font-medium text-neutral-500">
+              <tr>
+                <th className="px-3 py-2">When</th>
+                <th className="px-3 py-2">Action</th>
+                <th className="px-3 py-2">By</th>
+                <th className="px-3 py-2">Details</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.length === 0 ? (
+                <tr>
+                  <td colSpan={4} className="px-3 py-6 text-center text-neutral-400">No activity yet.</td>
                 </tr>
-              );
-            })
-          )}
-        </tbody>
-      </table>
+              ) : (
+                rows.map((a) => (
+                  <tr key={a.id} className="border-t border-neutral-100 align-top">
+                    <td className="whitespace-nowrap px-3 py-2 text-neutral-500">{fmt(a.created_at)}</td>
+                    <td className="px-3 py-2">
+                      <Badge className={ACTION_TONE[a.action] ?? "bg-neutral-100 text-neutral-700"}>{a.action}</Badge>
+                    </td>
+                    <td className="px-3 py-2 text-neutral-600">{a.performed_by ?? "—"}</td>
+                    <td className="px-3 py-2 text-neutral-600">{a.details ?? "—"}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   );
 }
