@@ -37,9 +37,17 @@ export async function POST(req: NextRequest) {
   try {
     await dbc.query("begin");
     const batch = await dbc.query(
-      `insert into enrichment_batches (client_id, orch_client_id, campaign_id, campaign_name, total, created_by)
-       values ($1, $2, $3, $4, $5, $6) returning id`,
-      [clientId, orchClientId || (filters as Record<string, unknown>)?.orchClientId || null, campaignId, campaignName, agentIds.length, user.id]
+      `insert into enrichment_batches (client_id, orch_client_id, campaign_id, campaign_name, total, created_by, filters)
+       values ($1, $2, $3, $4, $5, $6, $7::jsonb) returning id`,
+      [
+        clientId,
+        orchClientId || (filters as Record<string, unknown>)?.orchClientId || null,
+        campaignId,
+        campaignName,
+        agentIds.length,
+        user.id,
+        JSON.stringify({ filters, mode, source, selectedCount: Array.isArray(selectedIds) ? selectedIds.length : 0, rangeFrom: rangeFrom ?? null, rangeTo: rangeTo ?? null }),
+      ]
     );
     batchId = batch.rows[0].id;
     await dbc.query(
