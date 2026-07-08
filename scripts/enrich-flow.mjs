@@ -287,7 +287,10 @@ export async function enrichAgent(agent, log) {
     // professional track
     const vProfCourted = professionalCourted ? await step("verify_professional_courted", () => instantlyVerify(professionalCourted)) : null;
     let workBE = null, vWorkBE = null;
-    if (!safePersonal && agent.office_name && lc(vProfCourted) !== "valid") {
+    // Deliberate fix over Clay: hunt for a professional email ONLY when the Courted one isn't
+    // safe. (Clay compared the verdict to "valid" — a word Instantly never returns — so its
+    // hunt always ran, and a bad guessed email could override a perfectly verified one.)
+    if (!safePersonal && agent.office_name && !(professionalCourted && isSafe(vProfCourted))) {
       const domain = await step("find_domain", () => findDomain(agent));
       workBE = domain ? await step("be_work", () => beWorkEmail(agent.full_name, domain)) : null;
       vWorkBE = workBE ? await step("verify_work_be", () => instantlyVerify(workBE)) : null;
