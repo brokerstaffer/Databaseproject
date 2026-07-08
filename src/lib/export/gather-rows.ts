@@ -25,6 +25,7 @@ export async function gatherExportRows(args: GatherArgs): Promise<Record<string,
   const { mode = "agent", source = "courted", filters = {}, selectedIds, rangeFrom, rangeTo } = args;
   const from = Number(rangeFrom) > 0 ? Number(rangeFrom) : 1;
   const to = Number(rangeTo) > 0 ? Number(rangeTo) : null;
+  if (to && to < from) return []; // inverted range -> empty, not a negative LIMIT error
   const limit = to ? to - from + 1 : 100000;
   const offset = Math.max(from - 1, 0);
   const hasSelection = Array.isArray(selectedIds) && selectedIds.length > 0;
