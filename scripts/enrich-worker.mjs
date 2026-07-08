@@ -457,8 +457,10 @@ async function pushCycle() {
   const agents = await loadAgents(items.map((i) => i.agent_id));
   const { rows: batches } = await pool.query(
     `select b.id, b.campaign_id, b.status,
-            coalesce(c.name, split_part(b.campaign_name, ' + ', 1)) as client_name
-       from enrichment_batches b left join clients c on c.id = b.client_id
+            coalesce(oc.client_name, c.name, split_part(b.campaign_name, ' + ', 1)) as client_name
+       from enrichment_batches b
+       left join clients c on c.id = b.client_id
+       left join orch_clients oc on oc.id = b.orch_client_id
       where b.id = any($1::uuid[])`,
     [[...new Set(items.map((i) => i.batch_id))]]
   );

@@ -9,8 +9,9 @@ export const maxDuration = 300;
 // Export -> Send to campaign (in-house pipeline): queues the filtered (or selected) agents
 // as an enrichment batch. The enrich-worker Railway service picks it up, enriches each agent
 // (cached results reused), and pushes finished leads into the chosen EmailBison campaign.
-// Body: { clientId?, campaignId?, campaignName?, mode?, source?, filters?, selectedIds?, rangeFrom?, rangeTo? }
-// campaignId = EmailBison numeric id; omit it to enrich-only (no send).
+// Body: { orchClientId?, clientId?, campaignId?, campaignName?, mode?, source?, filters?, ... }
+// orchClientId = orch_clients.id (preferred; the shared client table other apps maintain);
+// clientId = legacy clients.id. campaignId = EmailBison numeric id; omit to enrich-only.
 export async function POST(req: NextRequest) {
   const supabase = await createClient();
   const {
@@ -19,7 +20,7 @@ export async function POST(req: NextRequest) {
   if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   const body = await req.json().catch(() => ({}));
-  const { clientId = null, campaignId = null, campaignName = null, mode = "agent", source = "courted", filters = {}, selectedIds, rangeFrom, rangeTo } = body ?? {};
+  const { orchClientId = null, clientId = null, campaignId = null, campaignName = null, mode = "agent", source = "courted", filters = {}, selectedIds, rangeFrom, rangeTo } = body ?? {};
 
   let rows: Record<string, unknown>[] = [];
   try {
@@ -38,7 +39,7 @@ export async function POST(req: NextRequest) {
     const batch = await dbc.query(
       `insert into enrichment_batches (client_id, orch_client_id, campaign_id, campaign_name, total, created_by)
        values ($1, $2, $3, $4, $5, $6) returning id`,
-      [clientId, (filters as Record<string, unknown>)?.orchClientId || null, campaignId, campaignName, agentIds.length, user.id]
+      [clientId, orchClientId || (filters as Record<string, unknown>)?.orchClientId || null, campaignId, campaignName, agentIds.length, user.id]
     );
     batchId = batch.rows[0].id;
     await dbc.query(

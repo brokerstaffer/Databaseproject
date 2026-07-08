@@ -14,7 +14,9 @@ import { EXPORT_COLUMNS } from "@/lib/export/columns";
 
 interface ClientOpt {
   id: string;
-  name: string;
+  client_name: string | null;
+  status: string | null;
+  lead_count: number;
 }
 interface Campaign {
   id: string;
@@ -53,9 +55,10 @@ export function ExportDialog({
   const [cols, setCols] = useState<Set<string>>(new Set(ALL_KEYS));
   const [busy, setBusy] = useState(false);
 
+  // Clients come from orch_clients — the shared table other apps (the orchestrator) maintain.
   useEffect(() => {
     if (open) {
-      fetch("/api/clients")
+      fetch("/api/orch/clients")
         .then((r) => r.json())
         .then((j) => setClients(j.clients ?? []));
     }
@@ -63,7 +66,7 @@ export function ExportDialog({
 
   useEffect(() => {
     if (clientId) {
-      fetch(`/api/bison/campaigns?clientId=${clientId}`)
+      fetch(`/api/bison/campaigns?orchClientId=${clientId}`)
         .then((r) => r.json())
         .then((j) => setCampaigns(j.campaigns ?? []));
       setCampaignId("");
@@ -120,7 +123,7 @@ export function ExportDialog({
     const res = await fetch("/api/enrichment/send", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...reqBody(), clientId, campaignId: campaign.bison_id, campaignName: campaign.name ?? null }),
+      body: JSON.stringify({ ...reqBody(), orchClientId: clientId, campaignId: campaign.bison_id, campaignName: campaign.name ?? null }),
     });
     setBusy(false);
     const j = await res.json().catch(() => ({}));
@@ -202,12 +205,12 @@ export function ExportDialog({
                   <SelectContent>
                     {clients.map((c) => (
                       <SelectItem key={c.id} value={c.id}>
-                        {c.name}
+                        {c.client_name ?? "Unnamed client"}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
-                {clients.length === 0 && <p className="mt-1 text-xs text-neutral-500">No clients yet — add one on the Clients page.</p>}
+                {clients.length === 0 && <p className="mt-1 text-xs text-neutral-500">No clients yet — they appear here once onboarded (orch_clients).</p>}
               </div>
               <div>
                 <label className="text-sm font-medium text-neutral-700">EmailBison campaign</label>
