@@ -232,7 +232,8 @@ export function ClientPopover({ value, onChange }: { value: string; onChange: (v
     if (open) {
       setSel(value);
       if (clients === null) {
-        fetch("/api/orch/clients")
+        // only clients whose leads are up for review (orchestrator sets leads_inreview)
+        fetch("/api/orch/clients?inReview=1")
           .then((r) => r.json())
           .then((j) => setClients(j.clients ?? []))
           .catch(() => setClients([]));

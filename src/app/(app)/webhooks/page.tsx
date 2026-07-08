@@ -12,6 +12,8 @@ interface OrchClientRow {
   mls: string | null;
   location: string | null;
   bison_campaign_id: string | null;
+  leads_inreview: boolean;
+  bison_leads_exported: boolean;
   lead_count: number;
   created_at: string;
 }
@@ -89,6 +91,8 @@ export default function ClientsPage() {
               <th className="px-4 py-3">MLS</th>
               <th className="px-4 py-3">Location</th>
               <th className="px-4 py-3 text-right">Leads built</th>
+              <th className="px-4 py-3">In review</th>
+              <th className="px-4 py-3">Exported</th>
               <th className="px-4 py-3 text-right">Campaign ID</th>
               <th className="px-4 py-3">Onboarded</th>
             </tr>
@@ -96,13 +100,13 @@ export default function ClientsPage() {
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={7} className="py-12 text-center text-neutral-400">
+                <td colSpan={9} className="py-12 text-center text-neutral-400">
                   Loading…
                 </td>
               </tr>
             ) : clients.length === 0 ? (
               <tr>
-                <td colSpan={7} className="py-12 text-center text-neutral-400">
+                <td colSpan={9} className="py-12 text-center text-neutral-400">
                   No clients yet — they appear here automatically once onboarded.
                 </td>
               </tr>
@@ -116,6 +120,12 @@ export default function ClientsPage() {
                   <td className="px-4 py-3 text-neutral-600">{c.mls ?? "—"}</td>
                   <td className="px-4 py-3 text-neutral-600">{c.location ?? "—"}</td>
                   <td className="px-4 py-3 text-right tabular-nums text-neutral-800">{c.lead_count.toLocaleString()}</td>
+                  <td className="px-4 py-3">
+                    {c.leads_inreview ? <Badge className="bg-amber-100 text-amber-800">In review</Badge> : <span className="text-neutral-400">—</span>}
+                  </td>
+                  <td className="px-4 py-3">
+                    {c.bison_leads_exported ? <Badge className="bg-green-100 text-green-800">Exported</Badge> : <span className="text-neutral-400">—</span>}
+                  </td>
                   <td className="px-4 py-3 text-right tabular-nums text-neutral-600">{c.bison_campaign_id ?? "—"}</td>
                   <td className="px-4 py-3 text-neutral-500">{new Date(c.created_at).toLocaleDateString()}</td>
                 </tr>

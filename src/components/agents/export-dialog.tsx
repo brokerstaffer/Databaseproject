@@ -17,6 +17,7 @@ interface ClientOpt {
   client_name: string | null;
   status: string | null;
   lead_count: number;
+  bison_campaign_id: string | null;
 }
 interface Campaign {
   id: string;
@@ -66,13 +67,20 @@ export function ExportDialog({
 
   useEffect(() => {
     if (clientId) {
+      const target = clients.find((c) => c.id === clientId)?.bison_campaign_id ?? null;
       fetch(`/api/bison/campaigns?orchClientId=${clientId}`)
         .then((r) => r.json())
-        .then((j) => setCampaigns(j.campaigns ?? []));
-      setCampaignId("");
+        .then((j) => {
+          const list: Campaign[] = j.campaigns ?? [];
+          setCampaigns(list);
+          // the client's designated campaign (orch_clients.bison_campaign_id) is the default
+          setCampaignId(list.find((c) => c.bison_id === target)?.id ?? "");
+        });
     } else {
       setCampaigns([]);
+      setCampaignId("");
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clientId]);
 
   // In Office mode the export is "all agents belonging to the chosen offices".
