@@ -357,17 +357,17 @@ async function refreshActiveBatches() {
        ) s
       where b.id = s.batch_id and b.status in ('queued','running')`
   );
-  // Orchestrator handshake: once a batch has actually delivered leads into the client's
-  // designated campaign (orch_clients.bison_campaign_id), flag the client as exported.
+  // Orchestrator handshake: once a batch has actually delivered leads into a campaign,
+  // flag that campaign as populated (bison_campaigns.leads_imported_campaign).
   await pool.query(
-    `update orch_clients oc
-        set bison_leads_exported = true, updated_at = now()
+    `update bison_campaigns bc
+        set leads_imported_campaign = true
        from enrichment_batches b
-      where b.orch_client_id = oc.id
-        and b.status = 'done'
+      where b.status = 'done'
         and b.sent > 0
-        and b.campaign_id = oc.bison_campaign_id
-        and oc.bison_leads_exported = false`
+        and b.campaign_id is not null
+        and coalesce(bc.raw->>'id', bc.bison_campaign_id) = b.campaign_id
+        and bc.leads_imported_campaign is distinct from true`
   );
 }
 
