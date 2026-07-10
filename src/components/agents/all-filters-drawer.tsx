@@ -113,12 +113,22 @@ function RangeSection({
   prefix?: string;
   suffix?: string;
 }) {
-  const toggle = (k: string) =>
+  // Presets and a custom range are mutually exclusive (same rule as the inline popovers) —
+  // combining them ANDs contradictory conditions and silently returns 0 rows.
+  const hasCustom = !!value.min || !!value.max;
+  const hasBuckets = value.buckets.length > 0;
+  const disablePills = hasCustom && !hasBuckets;
+  const disableCustom = hasBuckets && !hasCustom;
+  const toggle = (k: string) => {
+    if (disablePills) return;
     onChange({ ...value, buckets: value.buckets.includes(k) ? value.buckets.filter((x) => x !== k) : [...value.buckets, k] });
+  };
   return (
     <Section title={title} count={count}>
       {hasSide && <SideRadios side={value.side ?? "all"} onChange={(s) => onChange({ ...value, side: s })} />}
-      <BucketPills buckets={buckets} selected={value.buckets} onToggle={toggle} />
+      <div className={disablePills ? "pointer-events-none opacity-40" : undefined}>
+        <BucketPills buckets={buckets} selected={value.buckets} onToggle={toggle} />
+      </div>
       <MinMax
         min={value.min}
         max={value.max}
@@ -126,7 +136,10 @@ function RangeSection({
         setMax={(v) => onChange({ ...value, max: v })}
         prefix={prefix}
         suffix={suffix}
+        commas={prefix === "$"}
+        disabled={disableCustom}
       />
+      {hasBuckets && hasCustom && <p className="mt-2 text-xs text-amber-600">Using both a preset and a custom range — clear one.</p>}
     </Section>
   );
 }

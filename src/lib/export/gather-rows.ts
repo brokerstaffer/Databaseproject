@@ -28,7 +28,9 @@ const AGENT_SELECT = `
 const CHUNK = 5000;
 
 // Fetch full agent rows for a list of ids, in chunks, preserving the id-list order.
-async function fetchAgentRowsByIds(ids: string[]): Promise<Record<string, unknown>[]> {
+// Ids are deduped first — a repeated id in selectedIds must not emit the agent twice.
+async function fetchAgentRowsByIds(rawIds: string[]): Promise<Record<string, unknown>[]> {
+  const ids = [...new Set(rawIds)];
   const out: Record<string, unknown>[] = [];
   for (let i = 0; i < ids.length; i += CHUNK) {
     const chunk = ids.slice(i, i + CHUNK);

@@ -134,17 +134,22 @@ export const missingContactCount = (m: { email: boolean; phone: boolean }) => (m
 
 // Total count of every ACTIVE agent-search filter — drives the "All filters (N)" badge and
 // the Clear-all button visibility. (nameQuery is a find/highlight tool, not counted.)
-// Mode-aware: office-only (agentCount) and agent-only (missingContact) filters only count in
-// the mode where they actually apply, so the badge never over-reports across a mode switch.
+// Mode-aware: the badge counts ONLY the filters the current mode's query actually applies.
+// Office mode applies just: location, sales volume, office search, closed units, agent count,
+// and the client filter — everything else is agent-only.
 export function activeFilterCount(f: Filters, mode: "agent" | "office" = "agent"): number {
-  return (
+  const shared =
     f.location.values.length +
     rangeCount(f.salesVolume) +
     officeSearchCount(f.officeSearch) +
+    rangeCount(f.closedUnits) +
+    (f.orchClientId ? 1 : 0);
+  if (mode === "office") return shared + rangeCount(f.agentCount);
+  return (
+    shared +
     f.mls.include.length + f.mls.exclude.length +
     ieCount(f.title) +
     ieCount(f.license) +
-    rangeCount(f.closedUnits) +
     rangeCount(f.closedTransactions) +
     rangeCount(f.estTimeInIndustry) +
     rangeCount(f.approxGci) +
@@ -152,8 +157,7 @@ export function activeFilterCount(f: Filters, mode: "agent" | "office" = "agent"
     rangeCount(f.estTimeInOffice) +
     rangeCount(f.avgTimeAtOffice) +
     ieCount(f.name) +
-    (f.orchClientId ? 1 : 0) +
-    (mode === "office" ? rangeCount(f.agentCount) : missingContactCount(f.missingContact)) +
+    missingContactCount(f.missingContact) +
     zillowRealtorCount(f.zillowRealtor)
   );
 }

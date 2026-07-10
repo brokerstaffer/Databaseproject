@@ -540,10 +540,10 @@ export async function upsertAgentRows(client: PoolClient, rows: Row[], source: s
          from (
            select o2.id,
                   count(a.id) as n,
-                  sum(a.sales_volume)     as sales_volume,
-                  sum(a.list_side_dollar) as list_side_dollar,
-                  sum(a.buy_side_dollar)  as buy_side_dollar,
-                  sum(a.units)            as units
+                  coalesce(sum(a.sales_volume), 0)     as sales_volume,
+                  coalesce(sum(a.list_side_dollar), 0) as list_side_dollar,
+                  coalesce(sum(a.buy_side_dollar), 0)  as buy_side_dollar,
+                  coalesce(sum(a.units), 0)            as units
              from offices o2 left join agents a on a.office_id = o2.id
             where o2.id = any($1::uuid[]) group by o2.id
          ) s

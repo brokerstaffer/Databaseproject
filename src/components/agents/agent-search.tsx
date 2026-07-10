@@ -344,6 +344,7 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
                 key={m}
                 type="button"
                 onClick={() => {
+                  if (m === mode) return; // misclick on the active button must not wipe state
                   setMode(m);
                   setPage(1);
                   setSelected(new Set());
@@ -363,6 +364,7 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
                 key={s}
                 type="button"
                 onClick={() => {
+                  if (s === source) return; // misclick on the active button must not wipe state
                   setSource(s);
                   setPage(1);
                   setSelected(new Set());
@@ -383,36 +385,48 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
               </button>
             </span>
           )}
+          {/* Only the filters the current mode's query actually applies are shown — office
+              mode narrows on location / volume / office / units / agent count / client. */}
           <ClientPopover value={filters.orchClientId} clientMode={filters.orchClientMode} onChange={(id, m) => { setFilters((p) => ({ ...p, orchClientId: id, orchClientMode: m })); setPage(1); }} />
           <LocationPopover value={filters.location} onChange={(v) => setF("location", v)} />
           <RangePopover label="Sales volume" hasSide prefix="$" buckets={SALES_VOLUME_BUCKETS} value={filters.salesVolume} onChange={(v) => setF("salesVolume", v)} />
           <OfficeSearchPopover value={filters.officeSearch} onChange={(v) => setF("officeSearch", v)} />
-          <MlsPopover value={filters.mls} onChange={(v) => setF("mls", v)} />
-          <TitlePopover value={filters.title} onChange={(v) => setF("title", v)} />
-          <LicensePopover value={filters.license} onChange={(v) => setF("license", v)} />
-          <NamePopover value={filters.name} onChange={(v) => setF("name", v)} />
+          {mode === "agent" && (
+            <>
+              <MlsPopover value={filters.mls} onChange={(v) => setF("mls", v)} />
+              <TitlePopover value={filters.title} onChange={(v) => setF("title", v)} />
+              <LicensePopover value={filters.license} onChange={(v) => setF("license", v)} />
+              <NamePopover value={filters.name} onChange={(v) => setF("name", v)} />
+              <MissingContactPopover value={filters.missingContact} onChange={(v) => setF("missingContact", v)} />
+            </>
+          )}
           {mode === "office" && (
             <RangePopover label="Agents in office" suffix="#" buckets={COUNT_BUCKETS} value={{ side: "all", ...filters.agentCount }} onChange={(v) => setF("agentCount", { buckets: v.buckets, min: v.min, max: v.max })} />
           )}
-          {mode === "agent" && <MissingContactPopover value={filters.missingContact} onChange={(v) => setF("missingContact", v)} />}
           <RangePopover label="Closed units" hasSide prefix="#" buckets={COUNT_BUCKETS} value={filters.closedUnits} onChange={(v) => setF("closedUnits", v)} />
-          <RangePopover label="Closed transactions" hasSide prefix="#" buckets={COUNT_BUCKETS} value={filters.closedTransactions} onChange={(v) => setF("closedTransactions", v)} />
-          <RangePopover label="Est. time in industry" suffix="yrs" buckets={YEAR_BUCKETS} value={{ side: "all", ...filters.estTimeInIndustry }} onChange={(v) => setF("estTimeInIndustry", { buckets: v.buckets, min: v.min, max: v.max })} />
-          <RangePopover label="Approx. GCI" prefix="$" buckets={GCI_BUCKETS} value={{ side: "all", ...filters.approxGci }} onChange={(v) => setF("approxGci", { buckets: v.buckets, min: v.min, max: v.max })} />
-          <ZillowRealtorPopover value={filters.zillowRealtor ?? DEFAULT_FILTERS.zillowRealtor} onChange={(v) => setF("zillowRealtor", v)} />
-          <button
-            type="button"
-            onClick={() => setAllFiltersOpen(true)}
-            className="inline-flex items-center gap-2 rounded-lg border border-neutral-300 bg-white px-3.5 py-2 text-sm font-medium text-neutral-700 hover:bg-neutral-50"
-          >
-            <SlidersHorizontal className="h-4 w-4" />
-            All filters
-            {filterCount > 0 && (
-              <span className="ml-0.5 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-neutral-900 px-1.5 text-xs font-medium text-white">
-                {filterCount}
-              </span>
-            )}
-          </button>
+          {mode === "agent" && (
+            <>
+              <RangePopover label="Closed transactions" hasSide prefix="#" buckets={COUNT_BUCKETS} value={filters.closedTransactions} onChange={(v) => setF("closedTransactions", v)} />
+              <RangePopover label="Est. time in industry" suffix="yrs" buckets={YEAR_BUCKETS} value={{ side: "all", ...filters.estTimeInIndustry }} onChange={(v) => setF("estTimeInIndustry", { buckets: v.buckets, min: v.min, max: v.max })} />
+              <RangePopover label="Approx. GCI" prefix="$" buckets={GCI_BUCKETS} value={{ side: "all", ...filters.approxGci }} onChange={(v) => setF("approxGci", { buckets: v.buckets, min: v.min, max: v.max })} />
+              <ZillowRealtorPopover value={filters.zillowRealtor ?? DEFAULT_FILTERS.zillowRealtor} onChange={(v) => setF("zillowRealtor", v)} />
+            </>
+          )}
+          {mode === "agent" && (
+            <button
+              type="button"
+              onClick={() => setAllFiltersOpen(true)}
+              className="inline-flex items-center gap-2 rounded-lg border border-neutral-300 bg-white px-3.5 py-2 text-sm font-medium text-neutral-700 hover:bg-neutral-50"
+            >
+              <SlidersHorizontal className="h-4 w-4" />
+              All filters
+              {filterCount > 0 && (
+                <span className="ml-0.5 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-neutral-900 px-1.5 text-xs font-medium text-white">
+                  {filterCount}
+                </span>
+              )}
+            </button>
+          )}
           {filterCount > 0 && (
             <button type="button" onClick={clearAllFilters} className="inline-flex items-center gap-1 rounded-lg px-2.5 py-2 text-sm font-medium text-neutral-500 hover:bg-neutral-100 hover:text-neutral-800">
               <X className="h-4 w-4" />
@@ -545,6 +559,7 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
               <button
                 key={s}
                 onClick={() => {
+                  if (s === pageSize && page === 1) return; // no-op click must not strand the jump flag
                   jumpTopRef.current = true;
                   setPageSize(s);
                   setPage(1);
