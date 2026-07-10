@@ -525,11 +525,29 @@ export async function upsertAgentRows(client: PoolClient, rows: Row[], source: s
       );
     }
 
-    // ---- 9) keep office.agent_count in sync for touched offices (incl. ones agents left) ----
+    // ---- 9) keep office.agent_count + aggregate metrics in sync for touched offices ----
+    // (office-level sales figures aren't in the source, so they're summed from the office's
+    // agents; recomputed for every office an agent joined or left this batch)
     const touched = [...recount];
     if (touched.length) {
       await client.query(
-        `update offices o set agent_count = (select count(*) from agents a where a.office_id = o.id) where o.id = any($1::uuid[])`,
+        `update offices o set
+           agent_count      = s.n,
+           sales_volume     = s.sales_volume,
+           list_side_dollar = s.list_side_dollar,
+           buy_side_dollar  = s.buy_side_dollar,
+           units            = s.units
+         from (
+           select o2.id,
+                  count(a.id) as n,
+                  sum(a.sales_volume)     as sales_volume,
+                  sum(a.list_side_dollar) as list_side_dollar,
+                  sum(a.buy_side_dollar)  as buy_side_dollar,
+                  sum(a.units)            as units
+             from offices o2 left join agents a on a.office_id = o2.id
+            where o2.id = any($1::uuid[]) group by o2.id
+         ) s
+        where o.id = s.id`,
         [touched]
       );
     }

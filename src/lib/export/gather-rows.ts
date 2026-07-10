@@ -1,9 +1,12 @@
-import { createAdminClient } from "@/lib/supabase/admin";
 import { getPool } from "@/lib/db/pool";
 
-// Shared row-gathering for both export paths (Send to Clay + CSV) so they can't drift.
+// Shared row-gathering for both export paths (CSV + campaign send) so they can't drift.
 // The export always produces AGENT rows. In Office mode it expands the chosen offices into
 // every agent that belongs to them (agents.office_id), so you can target whole brokerages.
+//
+// Large exports (10k+) used to time out because the old path built a giant JSON through the
+// API layer. Now we get just the matching ids fast (fn_filter_ids), then fetch full rows in
+// chunks through the direct pool (2-min timeout) — any size works.
 
 type GatherArgs = {
   mode?: string;
@@ -14,12 +17,31 @@ type GatherArgs = {
   rangeTo?: unknown;
 };
 
-// agent.* + its MLS affiliations (same shape the export columns expect).
+// agent.* + its MLS affiliations (same shape the export columns expect). Ordered by the id
+// list's position so the export keeps the search's sort order.
 const AGENT_SELECT = `
   select a.*,
     (select jsonb_agg(jsonb_build_object('code', m.code, 'member_id', am.mls_member_id))
        from agent_mls am join mls m on m.id = am.mls_id where am.agent_id = a.id) as mls
   from agents a`;
+
+const CHUNK = 5000;
+
+// Fetch full agent rows for a list of ids, in chunks, preserving the id-list order.
+async function fetchAgentRowsByIds(ids: string[]): Promise<Record<string, unknown>[]> {
+  const out: Record<string, unknown>[] = [];
+  for (let i = 0; i < ids.length; i += CHUNK) {
+    const chunk = ids.slice(i, i + CHUNK);
+    const { rows } = await getPool().query(
+      `${AGENT_SELECT}
+         join unnest($1::uuid[]) with ordinality as u(id, ord) on u.id = a.id
+        order by u.ord`,
+      [chunk]
+    );
+    out.push(...(rows as Record<string, unknown>[]));
+  }
+  return out;
+}
 
 export async function gatherExportRows(args: GatherArgs): Promise<Record<string, unknown>[]> {
   const { mode = "agent", source = "courted", filters = {}, selectedIds, rangeFrom, rangeTo } = args;
@@ -29,6 +51,7 @@ export async function gatherExportRows(args: GatherArgs): Promise<Record<string,
   const limit = to ? to - from + 1 : 100000;
   const offset = Math.max(from - 1, 0);
   const hasSelection = Array.isArray(selectedIds) && selectedIds.length > 0;
+  const pool = getPool();
 
   // ---------- OFFICE MODE: chosen offices -> all of their agents ----------
   if (mode === "office") {
@@ -36,24 +59,15 @@ export async function gatherExportRows(args: GatherArgs): Promise<Record<string,
     if (hasSelection) {
       officeIds = selectedIds as string[];
     } else {
-      // no explicit selection -> every office matching the current filters (respecting range)
-      const admin = createAdminClient();
-      const { data, error } = await admin.rpc("fn_filter_search", {
-        p_mode: "office",
-        p_source: source,
-        p_filters: filters,
-        p_sort_by: "sales_volume",
-        p_sort_dir: "desc",
-        p_limit: Math.min(limit, 100000),
-        p_offset: offset,
-      });
-      if (error) throw new Error(error.message);
-      officeIds = ((data?.data ?? []) as { id?: string }[]).map((o) => o.id!).filter(Boolean);
+      const { rows } = await pool.query(
+        `select fn_filter_ids('office', $1, $2::jsonb, 'sales_volume', 'desc', $3, $4) as ids`,
+        [source, JSON.stringify(filters), Math.min(limit, 100000), offset]
+      );
+      officeIds = (rows[0]?.ids ?? []) as string[];
     }
     if (officeIds.length === 0) return [];
-    // Bound the fan-out: an office can hold many agents, so cap total exported agents at 100k
-    // (same ceiling agent mode uses) to avoid materializing an unbounded set / firing a POST per agent.
-    const { rows } = await getPool().query(
+    // Cap total exported agents at 100k (an office can hold many agents).
+    const { rows } = await pool.query(
       `${AGENT_SELECT} where a.office_id = any($1::uuid[]) order by a.sales_volume desc nulls last limit 100000`,
       [officeIds]
     );
@@ -62,22 +76,13 @@ export async function gatherExportRows(args: GatherArgs): Promise<Record<string,
 
   // ---------- AGENT MODE ----------
   if (hasSelection) {
-    const { rows } = await getPool().query(
-      `${AGENT_SELECT} where a.id = any($1::uuid[]) order by a.sales_volume desc nulls last`,
-      [selectedIds as string[]]
-    );
-    return rows as Record<string, unknown>[];
+    return fetchAgentRowsByIds(selectedIds as string[]);
   }
-  const admin = createAdminClient();
-  const { data, error } = await admin.rpc("fn_filter_search", {
-    p_mode: "agent",
-    p_source: source,
-    p_filters: filters,
-    p_sort_by: "sales_volume",
-    p_sort_dir: "desc",
-    p_limit: Math.min(limit, 100000),
-    p_offset: offset,
-  });
-  if (error) throw new Error(error.message);
-  return (data?.data ?? []) as Record<string, unknown>[];
+  const { rows } = await pool.query(
+    `select fn_filter_ids('agent', $1, $2::jsonb, 'sales_volume', 'desc', $3, $4) as ids`,
+    [source, JSON.stringify(filters), Math.min(limit, 100000), offset]
+  );
+  const ids = (rows[0]?.ids ?? []) as string[];
+  if (ids.length === 0) return [];
+  return fetchAgentRowsByIds(ids);
 }
