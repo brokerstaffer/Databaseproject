@@ -129,7 +129,7 @@ export const LOCATION_KINDS: [LocationKind, string][] = [
   ["home", "Home location"],
 ];
 
-export function LocationPopover({ value, onChange }: { value: LocationFilter; onChange: (v: LocationFilter) => void }) {
+export function LocationPopover({ value, onChange, officeMode = false }: { value: LocationFilter; onChange: (v: LocationFilter) => void; officeMode?: boolean }) {
   const [open, setOpen] = useState(false);
   const [field, setField] = useState<LocationField>(value.field);
   const [kinds, setKinds] = useState<LocationKind[]>(value.appliesTo);
@@ -193,7 +193,7 @@ export function LocationPopover({ value, onChange }: { value: LocationFilter; on
             setQuery={setQuery}
             options={options.filter((o) => !values.includes(o))}
             onPick={(v) => {
-              if (!values.includes(v)) setValues([...values, v]);
+              if (!values.includes(v) && values.length < 50) setValues([...values, v]); // hard 50 cap
               setQuery("");
             }}
           />
@@ -214,14 +214,18 @@ export function LocationPopover({ value, onChange }: { value: LocationFilter; on
         <span className="text-neutral-400">{values.length}/50 selected</span>
       </div>
       <Chips items={values} onRemove={(v) => setValues(values.filter((x) => x !== v))} />
-      <div className="mt-3 space-y-2.5">
-        {LOCATION_KINDS.map(([k, l]) => (
-          <label key={k} className="flex items-center gap-2 text-sm text-neutral-800">
-            <Checkbox checked={kinds.includes(k)} onCheckedChange={() => toggleKind(k)} />
-            {l}
-          </label>
-        ))}
-      </div>
+      {/* Office mode always filters on the OFFICE's location — the kind checkboxes only apply
+          to agent searches, so they're hidden there instead of silently ignored. */}
+      {!officeMode && (
+        <div className="mt-3 space-y-2.5">
+          {LOCATION_KINDS.map(([k, l]) => (
+            <label key={k} className="flex items-center gap-2 text-sm text-neutral-800">
+              <Checkbox checked={kinds.includes(k)} onCheckedChange={() => toggleKind(k)} />
+              {l}
+            </label>
+          ))}
+        </div>
+      )}
     </FilterPopoverShell>
   );
 }

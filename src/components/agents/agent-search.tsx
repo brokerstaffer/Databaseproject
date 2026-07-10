@@ -388,7 +388,7 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
           {/* Only the filters the current mode's query actually applies are shown — office
               mode narrows on location / volume / office / units / agent count / client. */}
           <ClientPopover value={filters.orchClientId} clientMode={filters.orchClientMode} onChange={(id, m) => { setFilters((p) => ({ ...p, orchClientId: id, orchClientMode: m })); setPage(1); }} />
-          <LocationPopover value={filters.location} onChange={(v) => setF("location", v)} />
+          <LocationPopover value={filters.location} onChange={(v) => setF("location", v)} officeMode={mode === "office"} />
           <RangePopover label="Sales volume" hasSide prefix="$" buckets={SALES_VOLUME_BUCKETS} value={filters.salesVolume} onChange={(v) => setF("salesVolume", v)} />
           <OfficeSearchPopover value={filters.officeSearch} onChange={(v) => setF("officeSearch", v)} />
           {mode === "agent" && (
@@ -403,7 +403,8 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
           {mode === "office" && (
             <RangePopover label="Agents in office" suffix="#" buckets={COUNT_BUCKETS} value={{ side: "all", ...filters.agentCount }} onChange={(v) => setF("agentCount", { buckets: v.buckets, min: v.min, max: v.max })} />
           )}
-          <RangePopover label="Closed units" hasSide prefix="#" buckets={COUNT_BUCKETS} value={filters.closedUnits} onChange={(v) => setF("closedUnits", v)} />
+          {/* office mode always ranges on total units — the List/Buy split is agent-only */}
+          <RangePopover label="Closed units" hasSide={mode === "agent"} prefix="#" buckets={COUNT_BUCKETS} value={filters.closedUnits} onChange={(v) => setF("closedUnits", v)} />
           {mode === "agent" && (
             <>
               <RangePopover label="Closed transactions" hasSide prefix="#" buckets={COUNT_BUCKETS} value={filters.closedTransactions} onChange={(v) => setF("closedTransactions", v)} />

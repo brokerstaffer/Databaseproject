@@ -74,7 +74,7 @@ function LocationSection({ value, onChange }: { value: LocationFilter; onChange:
             setQuery={setQuery}
             options={options.filter((o) => !value.values.includes(o))}
             onPick={(v) => {
-              if (!value.values.includes(v)) onChange({ ...value, values: [...value.values, v] });
+              if (!value.values.includes(v) && value.values.length < 50) onChange({ ...value, values: [...value.values, v] }); // hard 50 cap
               setQuery("");
             }}
           />
@@ -327,22 +327,10 @@ function NameSection({ value, onChange }: { value: IncludeExclude; onChange: (v:
   return (
     <Section title="Name" count={ieCount(value)}>
       <div className="flex items-center gap-6">
-        <RadioOpt
-          label="Include"
-          on={mode === "include"}
-          onClick={() => {
-            setMode("include");
-            onChange({ include: Array.from(new Set([...value.include, ...value.exclude])), exclude: [] });
-          }}
-        />
-        <RadioOpt
-          label="Exclude"
-          on={mode === "exclude"}
-          onClick={() => {
-            setMode("exclude");
-            onChange({ include: [], exclude: Array.from(new Set([...value.exclude, ...value.include])) });
-          }}
-        />
+        {/* Radios only choose the bucket for the NEXT pick — existing chips never move. */}
+        <RadioOpt label="Include" on={mode === "include"} onClick={() => setMode("include")} />
+        <RadioOpt label="Exclude" on={mode === "exclude"} onClick={() => setMode("exclude")} />
+        <span className="ml-auto text-xs text-neutral-400">{ieCount(value)} selected</span>
       </div>
       <div className="mt-2">
         <SearchBox placeholder="Search by name" query={query} setQuery={setQuery} options={options.filter((o) => !taken.includes(o))} onPick={pick} />
@@ -368,22 +356,10 @@ function LicenseSection({ value, onChange }: { value: IncludeExclude; onChange: 
   return (
     <Section title="License" count={ieCount(value)}>
       <div className="flex items-center gap-6">
-        <RadioOpt
-          label="Include"
-          on={mode === "include"}
-          onClick={() => {
-            setMode("include");
-            onChange({ include: Array.from(new Set([...value.include, ...value.exclude])), exclude: [] });
-          }}
-        />
-        <RadioOpt
-          label="Exclude"
-          on={mode === "exclude"}
-          onClick={() => {
-            setMode("exclude");
-            onChange({ include: [], exclude: Array.from(new Set([...value.exclude, ...value.include])) });
-          }}
-        />
+        {/* Radios only choose the bucket for the NEXT pick — existing chips never move. */}
+        <RadioOpt label="Include" on={mode === "include"} onClick={() => setMode("include")} />
+        <RadioOpt label="Exclude" on={mode === "exclude"} onClick={() => setMode("exclude")} />
+        <span className="ml-auto text-xs text-neutral-400">{ieCount(value)} selected</span>
       </div>
       <div className="mt-2">
         <SearchBox placeholder="Search license #" query={query} setQuery={setQuery} options={options.filter((o) => !taken.includes(o))} onPick={pick} />
