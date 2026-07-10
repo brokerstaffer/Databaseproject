@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { FileDown, Users } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { toast } from "sonner";
 
 // ---------- campaign sends (enrichment batches) ----------
 interface BatchFilters {
@@ -89,9 +91,19 @@ function summarizeFilters(bf: BatchFilters | null): string {
   return parts.length ? parts.join(" · ") : "no filters (all agents)";
 }
 
+interface FailureRow {
+  full_name: string | null;
+  email: string | null;
+  attempts: number;
+  reasons: string[];
+}
+
 export default function ExportPage() {
   const [batches, setBatches] = useState<BatchRow[]>([]);
   const [rows, setRows] = useState<AuditRow[]>([]);
+  const [retrying, setRetrying] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const [failures, setFailures] = useState<Record<string, FailureRow[] | "loading">>({});
 
   const load = useCallback(async () => {
     const [b, h] = await Promise.all([fetch("/api/enrichment/batches"), fetch("/api/export/history")]);
@@ -105,6 +117,37 @@ export default function ExportPage() {
     const t = setInterval(load, 5000); // live progress while batches run
     return () => clearInterval(t);
   }, [load]);
+
+  async function toggleFailures(batchId: string) {
+    if (expanded === batchId) {
+      setExpanded(null);
+      return;
+    }
+    setExpanded(batchId);
+    setFailures((f) => ({ ...f, [batchId]: "loading" }));
+    const r = await fetch(`/api/enrichment/failures?batchId=${batchId}`);
+    const j = await r.json().catch(() => ({}));
+    setFailures((f) => ({ ...f, [batchId]: j.failures ?? [] }));
+  }
+
+  async function retryBatch(b: BatchRow) {
+    if (!confirm(`Re-queue the ${b.failed} failed agent${b.failed > 1 ? "s" : ""}? Sent and skipped agents are never re-sent.`)) return;
+    setRetrying(b.id);
+    try {
+      const res = await fetch("/api/enrichment/retry", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ batchId: b.id }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) toast.error(j.error ?? "Retry failed");
+      else toast.success(`Re-queued ${j.retried} agent${j.retried === 1 ? "" : "s"} — the worker is on it`);
+    } finally {
+      setRetrying(null);
+      setExpanded(null);
+      load();
+    }
+  }
 
   return (
     <div className="mx-auto flex h-full max-w-6xl flex-col gap-4">
@@ -135,20 +178,22 @@ export default function ExportPage() {
                 <th className="px-4 py-2">Filters used</th>
                 <th className="px-4 py-2">Uploaded to Bison</th>
                 <th className="px-4 py-2">Status</th>
+                <th className="px-4 py-2" />
               </tr>
             </thead>
             <tbody>
               {batches.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-10 text-center text-neutral-400">
+                  <td colSpan={8} className="px-4 py-10 text-center text-neutral-400">
                     <FileDown className="mx-auto mb-2 h-6 w-6 text-neutral-300" />
                     No campaign sends yet.
                   </td>
                 </tr>
               ) : (
-                batches.map((b) => {
+                batches.flatMap((b) => {
                   const pending = b.total - b.sent - b.skipped - b.no_email - b.failed;
-                  return (
+                  const fl = failures[b.id];
+                  const out = [
                     <tr key={b.id} className="border-t border-neutral-100 align-top">
                       <td className="whitespace-nowrap px-4 py-2.5 text-neutral-500">{fmt(b.created_at)}</td>
                       <td className="px-4 py-2.5 text-neutral-600">{b.performed_by ?? "—"}</td>
@@ -165,15 +210,58 @@ export default function ExportPage() {
                         <div className="text-xs text-neutral-500">
                           {b.skipped > 0 && <span>{b.skipped} already in client’s campaigns · </span>}
                           {b.no_email > 0 && <span>{b.no_email} no email found · </span>}
-                          {b.failed > 0 && <span className="text-red-600">{b.failed} failed · </span>}
+                          {b.failed > 0 && (
+                            <button type="button" onClick={() => toggleFailures(b.id)} className="text-red-600 underline decoration-dotted hover:text-red-800">
+                              {b.failed} failed {expanded === b.id ? "▴" : "▾"}
+                            </button>
+                          )}
+                          {b.failed > 0 && " · "}
                           {pending > 0 && <span>{pending} in progress</span>}
                         </div>
                       </td>
                       <td className="px-4 py-2.5">
                         <Badge className={BATCH_TONE[b.status] ?? "bg-neutral-100 text-neutral-700"}>{b.status}</Badge>
                       </td>
-                    </tr>
-                  );
+                      <td className="px-4 py-2.5 text-right">
+                        {b.failed > 0 && b.status === "done" && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-7 shrink-0 whitespace-nowrap px-2 text-xs"
+                            disabled={retrying === b.id}
+                            onClick={() => retryBatch(b)}
+                          >
+                            {retrying === b.id ? "Retrying…" : `Retry failed (${b.failed})`}
+                          </Button>
+                        )}
+                      </td>
+                    </tr>,
+                  ];
+                  if (expanded === b.id) {
+                    out.push(
+                      <tr key={b.id + "-failures"} className="border-t border-neutral-100 bg-red-50/40">
+                        <td colSpan={8} className="px-6 py-3">
+                          {fl === "loading" || !fl ? (
+                            <span className="text-sm text-neutral-400">Loading failure details…</span>
+                          ) : fl.length === 0 ? (
+                            <span className="text-sm text-neutral-400">No failed agents (they may have been retried already).</span>
+                          ) : (
+                            <div className="space-y-1.5">
+                              {fl.map((f, i) => (
+                                <div key={i} className="text-xs">
+                                  <span className="font-medium text-neutral-800">{f.full_name ?? "Unknown agent"}</span>
+                                  {f.email && <span className="text-neutral-500"> · {f.email}</span>}
+                                  <span className="text-neutral-400"> · {f.attempts} attempts</span>
+                                  <div className="text-red-700">{f.reasons.join(" — ")}</div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  }
+                  return out;
                 })
               )}
             </tbody>
