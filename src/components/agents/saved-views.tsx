@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Save, Trash2, FolderOpen } from "lucide-react";
+import { Save, Trash2, FolderOpen, Pencil, Check, X } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -19,6 +19,8 @@ export function SavedViews({ filters, onLoad }: { filters: Filters; onLoad: (f: 
   const [lists, setLists] = useState<SavedList[]>([]);
   const [name, setName] = useState("");
   const [saving, setSaving] = useState(false);
+  const [editId, setEditId] = useState<string | null>(null);
+  const [editName, setEditName] = useState("");
 
   async function load() {
     const r = await fetch("/api/lists");
@@ -70,6 +72,22 @@ export function SavedViews({ filters, onLoad }: { filters: Filters; onLoad: (f: 
     }
   }
 
+  async function rename(id: string) {
+    if (!editName.trim()) return;
+    const res = await fetch(`/api/lists/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: editName.trim() }),
+    });
+    setEditId(null);
+    if (res.ok) {
+      toast.success("View renamed");
+      load();
+    } else {
+      toast.error("Rename failed");
+    }
+  }
+
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
@@ -98,30 +116,62 @@ export function SavedViews({ filters, onLoad }: { filters: Filters; onLoad: (f: 
           {lists.length === 0 ? (
             <div className="px-1 py-2 text-sm text-neutral-400">No saved views yet.</div>
           ) : (
-            lists.map((v) => (
-              <div key={v.id} className="flex items-center justify-between rounded px-2 py-1.5 hover:bg-neutral-50">
-                <button
-                  type="button"
-                  onClick={() => {
-                    onLoad(v.filters);
-                    setOpen(false);
-                    toast.success(`Loaded "${v.name}"`);
-                  }}
-                  className="flex items-center gap-2 text-left text-sm text-neutral-800"
-                >
-                  <FolderOpen className="h-4 w-4 text-neutral-400" />
-                  {v.name}
-                </button>
-                <div className="flex items-center gap-2">
-                  <button type="button" onClick={() => update(v.id)} title="Save current filters into this view" className="text-xs font-medium text-neutral-500 hover:text-neutral-900">
-                    Update
+            lists.map((v) =>
+              editId === v.id ? (
+                <div key={v.id} className="flex items-center gap-2 rounded px-2 py-1.5">
+                  <Input
+                    value={editName}
+                    onChange={(e) => setEditName(e.target.value)}
+                    autoFocus
+                    className="h-8"
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") rename(v.id);
+                      if (e.key === "Escape") setEditId(null);
+                    }}
+                  />
+                  <button type="button" onClick={() => rename(v.id)} className="text-neutral-500 hover:text-green-600" title="Save name">
+                    <Check className="h-4 w-4" />
                   </button>
-                  <button type="button" onClick={() => del(v.id)} className="text-neutral-300 hover:text-red-600" title="Delete view">
-                    <Trash2 className="h-4 w-4" />
+                  <button type="button" onClick={() => setEditId(null)} className="text-neutral-400 hover:text-neutral-700" title="Cancel">
+                    <X className="h-4 w-4" />
                   </button>
                 </div>
-              </div>
-            ))
+              ) : (
+                <div key={v.id} className="flex items-center justify-between rounded px-2 py-1.5 hover:bg-neutral-50">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onLoad(v.filters);
+                      setOpen(false);
+                      toast.success(`Loaded "${v.name}"`);
+                    }}
+                    className="flex min-w-0 items-center gap-2 text-left text-sm text-neutral-800"
+                  >
+                    <FolderOpen className="h-4 w-4 shrink-0 text-neutral-400" />
+                    <span className="truncate">{v.name}</span>
+                  </button>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditId(v.id);
+                        setEditName(v.name);
+                      }}
+                      className="text-neutral-300 hover:text-neutral-700"
+                      title="Rename view"
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                    </button>
+                    <button type="button" onClick={() => update(v.id)} title="Save current filters into this view" className="text-xs font-medium text-neutral-500 hover:text-neutral-900">
+                      Update
+                    </button>
+                    <button type="button" onClick={() => del(v.id)} className="text-neutral-300 hover:text-red-600" title="Delete view">
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
+              )
+            )
           )}
         </div>
       </PopoverContent>

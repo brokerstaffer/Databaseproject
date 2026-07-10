@@ -58,6 +58,9 @@ export interface Filters {
   name: IncludeExclude; // full names (include/exclude)
   nameQuery: string; // free-text name search (top search bar)
   orchClientId: string; // orchestrator client (orch_clients.id) — "" = off
+  orchClientMode: "include" | "exclude"; // include that client's leads, or exclude them
+  missingContact: { email: boolean; phone: boolean }; // agents MISSING the checked contact info
+  agentCount: RangeF; // office mode: number of agents in the office
   zillowRealtor: ZillowRealtorFilter;
 }
 
@@ -78,6 +81,9 @@ export const DEFAULT_FILTERS: Filters = {
   name: { include: [], exclude: [] },
   nameQuery: "",
   orchClientId: "",
+  orchClientMode: "include",
+  missingContact: { email: false, phone: false },
+  agentCount: { buckets: [], min: "", max: "" },
   zillowRealtor: { languages: [], totalSales: { min: "", max: "" }, avgPriceAllTime: { min: "", max: "" }, avgVolumeAllTime: { min: "", max: "" }, hasLinkedin: false },
 };
 
@@ -124,3 +130,30 @@ export const officeSearchCount = (o: OfficeSearchFilter) => ieCount(o.brand) + i
 const mmCount = (m: MinMax) => (m.min ? 1 : 0) + (m.max ? 1 : 0);
 export const zillowRealtorCount = (z: ZillowRealtorFilter) =>
   z.languages.length + mmCount(z.totalSales) + mmCount(z.avgPriceAllTime) + mmCount(z.avgVolumeAllTime) + (z.hasLinkedin ? 1 : 0);
+export const missingContactCount = (m: { email: boolean; phone: boolean }) => (m.email ? 1 : 0) + (m.phone ? 1 : 0);
+
+// Total count of every ACTIVE agent-search filter — drives the "All filters (N)" badge and
+// the Clear-all button visibility. (nameQuery is a find/highlight tool, not counted.)
+// Mode-aware: office-only (agentCount) and agent-only (missingContact) filters only count in
+// the mode where they actually apply, so the badge never over-reports across a mode switch.
+export function activeFilterCount(f: Filters, mode: "agent" | "office" = "agent"): number {
+  return (
+    f.location.values.length +
+    rangeCount(f.salesVolume) +
+    officeSearchCount(f.officeSearch) +
+    f.mls.include.length + f.mls.exclude.length +
+    ieCount(f.title) +
+    ieCount(f.license) +
+    rangeCount(f.closedUnits) +
+    rangeCount(f.closedTransactions) +
+    rangeCount(f.estTimeInIndustry) +
+    rangeCount(f.approxGci) +
+    rangeCount(f.avgSalePrice) +
+    rangeCount(f.estTimeInOffice) +
+    rangeCount(f.avgTimeAtOffice) +
+    ieCount(f.name) +
+    (f.orchClientId ? 1 : 0) +
+    (mode === "office" ? rangeCount(f.agentCount) : missingContactCount(f.missingContact)) +
+    zillowRealtorCount(f.zillowRealtor)
+  );
+}

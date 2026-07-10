@@ -199,7 +199,20 @@ export function LocationPopover({ value, onChange }: { value: LocationFilter; on
           />
         </div>
       </div>
-      <div className="mt-1 text-right text-xs text-neutral-400">{values.length}/50</div>
+      <div className="mt-1 flex items-center justify-between text-xs">
+        {query.trim() && options.filter((o) => !values.includes(o)).length > 0 ? (
+          <button
+            type="button"
+            className="text-neutral-600 hover:underline"
+            onClick={() => setValues((vs) => Array.from(new Set([...vs, ...options])).slice(0, 50))}
+          >
+            Select all shown
+          </button>
+        ) : (
+          <span />
+        )}
+        <span className="text-neutral-400">{values.length}/50 selected</span>
+      </div>
       <Chips items={values} onRemove={(v) => setValues(values.filter((x) => x !== v))} />
       <div className="mt-3 space-y-2.5">
         {LOCATION_KINDS.map(([k, l]) => (
@@ -293,6 +306,7 @@ export function OfficeSearchPopover({ value, onChange }: { value: OfficeSearchFi
         </Select>
         <RadioOpt label="Include" on={mode === "include"} onClick={() => setMode("include")} />
         <RadioOpt label="Exclude" on={mode === "exclude"} onClick={() => setMode("exclude")} />
+        <span className="ml-auto text-xs text-neutral-400">{bInc.length + bExc.length + oInc.length + oExc.length} selected</span>
       </div>
       <div className="mt-2">
         <SearchBox placeholder={`Search ${entity}`} query={query} setQuery={setQuery} options={options.filter((o) => !taken.includes(o))} onPick={pick} />
@@ -399,7 +413,18 @@ export function MlsPopover({ value, onChange }: { value: IncludeExclude; onChang
           className="h-10 w-full rounded-lg border border-neutral-300 pl-9 pr-3 text-sm placeholder:text-neutral-400 focus:border-neutral-400 focus:outline-none"
         />
       </div>
-      <div className="mt-2 max-h-56 space-y-0.5 overflow-auto">
+      <div className="mt-2 flex items-center justify-between px-1 text-xs">
+        <span className="text-neutral-400">{sel.length} selected</span>
+        <div className="flex gap-3">
+          <button type="button" className="text-neutral-600 hover:underline" onClick={() => setSel((s) => Array.from(new Set([...s, ...items.map((m) => m.id)])))}>
+            Select all shown
+          </button>
+          <button type="button" className="text-neutral-600 hover:underline" onClick={() => setSel([])}>
+            Clear
+          </button>
+        </div>
+      </div>
+      <div className="mt-1 max-h-56 space-y-0.5 overflow-auto">
         {items.length === 0 ? (
           <div className="px-1 py-2 text-sm text-neutral-400">No MLS found.</div>
         ) : (
@@ -469,25 +494,13 @@ export function LicensePopover({ value, onChange }: { value: IncludeExclude; onC
         setOpen(false);
       }}
     >
-      <div className="flex items-center gap-6">
-        <RadioOpt
-          label="Include"
-          on={mode === "include"}
-          onClick={() => {
-            setMode("include");
-            setInc((a) => Array.from(new Set([...a, ...exc])));
-            setExc([]);
-          }}
-        />
-        <RadioOpt
-          label="Exclude"
-          on={mode === "exclude"}
-          onClick={() => {
-            setMode("exclude");
-            setExc((a) => Array.from(new Set([...a, ...inc])));
-            setInc([]);
-          }}
-        />
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-6">
+          {/* Radios set which bucket the NEXT pick goes into; existing chips stay put. */}
+          <RadioOpt label="Include" on={mode === "include"} onClick={() => setMode("include")} />
+          <RadioOpt label="Exclude" on={mode === "exclude"} onClick={() => setMode("exclude")} />
+        </div>
+        <span className="text-xs text-neutral-400">{inc.length + exc.length} selected</span>
       </div>
       <div className="mt-2">
         <SearchBox placeholder="Search license #" query={query} setQuery={setQuery} options={options.filter((o) => !taken.includes(o))} onPick={pick} />
@@ -544,25 +557,13 @@ export function NamePopover({ value, onChange }: { value: IncludeExclude; onChan
         setOpen(false);
       }}
     >
-      <div className="flex items-center gap-6">
-        <RadioOpt
-          label="Include"
-          on={mode === "include"}
-          onClick={() => {
-            setMode("include");
-            setInc((a) => Array.from(new Set([...a, ...exc])));
-            setExc([]);
-          }}
-        />
-        <RadioOpt
-          label="Exclude"
-          on={mode === "exclude"}
-          onClick={() => {
-            setMode("exclude");
-            setExc((a) => Array.from(new Set([...a, ...inc])));
-            setInc([]);
-          }}
-        />
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-6">
+          {/* Radios set which bucket the NEXT pick goes into; existing chips stay put. */}
+          <RadioOpt label="Include" on={mode === "include"} onClick={() => setMode("include")} />
+          <RadioOpt label="Exclude" on={mode === "exclude"} onClick={() => setMode("exclude")} />
+        </div>
+        <span className="text-xs text-neutral-400">{inc.length + exc.length} selected</span>
       </div>
       <div className="mt-2">
         <SearchBox placeholder="Search by name" query={query} setQuery={setQuery} options={options.filter((o) => !taken.includes(o))} onPick={pick} />

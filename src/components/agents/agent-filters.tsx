@@ -41,12 +41,17 @@ export function FilterPopoverShell({
           type="button"
           className={cn(
             "inline-flex items-center gap-1 rounded-md px-2.5 py-1.5 text-sm font-medium transition-colors",
-            count > 0 ? "bg-neutral-200 text-neutral-900" : "text-neutral-700 hover:bg-neutral-200"
+            // Active filters get a clear filled + ringed treatment so they stand out at a glance.
+            count > 0
+              ? "bg-neutral-900 text-white ring-2 ring-neutral-900/20"
+              : "text-neutral-700 hover:bg-neutral-200"
           )}
         >
           {label}
-          {count > 0 ? <span className="text-neutral-500">{` (${count})`}</span> : null}
-          <ChevronDown className="ml-0.5 h-4 w-4 text-neutral-400" />
+          {count > 0 ? (
+            <span className="ml-0.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-white/25 px-1 text-[11px] font-semibold">{count}</span>
+          ) : null}
+          <ChevronDown className={cn("ml-0.5 h-4 w-4", count > 0 ? "text-white/70" : "text-neutral-400")} />
         </button>
       </PopoverTrigger>
       <PopoverContent align="start" sideOffset={6} className={cn("rounded-2xl border-neutral-200 p-4 shadow-xl", width)}>
@@ -65,6 +70,18 @@ export function FilterPopoverShell({
         </div>
       </PopoverContent>
     </Popover>
+  );
+}
+
+// Small radio pill (used by include/exclude toggles that live in this file).
+export function Radio({ label, on, onClick }: { label: string; on: boolean; onClick: () => void }) {
+  return (
+    <button type="button" onClick={onClick} className="flex items-center gap-2 text-sm text-neutral-800">
+      <span className={cn("flex h-4 w-4 items-center justify-center rounded-full border", on ? "border-neutral-900" : "border-neutral-300")}>
+        {on && <span className="h-2 w-2 rounded-full bg-neutral-900" />}
+      </span>
+      {label}
+    </button>
   );
 }
 
@@ -106,6 +123,11 @@ export function BucketPills({ buckets, selected, onToggle }: { buckets: Bucket[]
   );
 }
 
+// values are stored as raw digit strings; with `commas` the input DISPLAYS thousands
+// separators (3,000,000) while storing "3000000" so the RPC still gets a plain number.
+const withCommas = (v: string) => (v === "" ? "" : Number(v).toLocaleString("en-US"));
+const stripCommas = (v: string) => v.replace(/[^0-9]/g, "");
+
 export function MinMax({
   min,
   max,
@@ -113,6 +135,8 @@ export function MinMax({
   setMax,
   prefix,
   suffix,
+  commas = false,
+  disabled = false,
 }: {
   min: string;
   max: string;
@@ -120,17 +144,21 @@ export function MinMax({
   setMax: (v: string) => void;
   prefix?: string;
   suffix?: string;
+  commas?: boolean;
+  disabled?: boolean;
 }) {
   const field = (val: string, set: (v: string) => void, ph: string) => (
     <div className="relative flex-1">
       {prefix && <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-neutral-400">{prefix}</span>}
       <input
-        value={val}
-        onChange={(e) => set(e.target.value)}
+        value={commas ? withCommas(val) : val}
+        onChange={(e) => set(commas ? stripCommas(e.target.value) : e.target.value)}
         inputMode="numeric"
         placeholder={ph}
+        disabled={disabled}
         className={cn(
           "h-10 w-full rounded-lg border border-neutral-300 text-sm placeholder:text-neutral-400 focus:border-neutral-400 focus:outline-none",
+          disabled && "cursor-not-allowed bg-neutral-50 text-neutral-400",
           prefix ? "pl-7" : "pl-3",
           suffix ? "pr-10" : "pr-3"
         )}
@@ -189,7 +217,17 @@ export function RangePopover({
   }, [open]);
 
   const count = value.buckets.length + (value.min ? 1 : 0) + (value.max ? 1 : 0);
-  const toggle = (k: string) => setSel((s) => (s.includes(k) ? s.filter((x) => x !== k) : [...s, k]));
+  // Presets and a custom range are mutually exclusive — picking one disables the other. If a
+  // filter somehow arrives with BOTH set (e.g. a legacy saved view), keep both editable so the
+  // user can resolve it instead of deadlocking; disable only when exactly one side is active.
+  const hasCustom = !!min || !!max;
+  const hasBuckets = sel.length > 0;
+  const disablePills = hasCustom && !hasBuckets;
+  const disableCustom = hasBuckets && !hasCustom;
+  const toggle = (k: string) => {
+    if (disablePills) return;
+    setSel((s) => (s.includes(k) ? s.filter((x) => x !== k) : [...s, k]));
+  };
 
   return (
     <FilterPopoverShell
@@ -209,8 +247,17 @@ export function RangePopover({
       }}
     >
       {hasSide && <SideRadios side={side} onChange={setSide} />}
-      <BucketPills buckets={buckets} selected={sel} onToggle={toggle} />
-      <MinMax min={min} max={max} setMin={setMin} setMax={setMax} prefix={prefix} suffix={suffix} />
+      <div className={cn(disablePills && "pointer-events-none opacity-40")}>
+        <BucketPills buckets={buckets} selected={sel} onToggle={toggle} />
+      </div>
+      <MinMax min={min} max={max} setMin={setMin} setMax={setMax} prefix={prefix} suffix={suffix} commas={prefix === "$"} disabled={disableCustom} />
+      {hasBuckets && hasCustom ? (
+        <p className="mt-2 text-xs text-amber-600">Using both a preset and a custom range — clear one.</p>
+      ) : disableCustom ? (
+        <p className="mt-2 text-xs text-neutral-400">Clear the presets to enter a custom range.</p>
+      ) : disablePills ? (
+        <p className="mt-2 text-xs text-neutral-400">Clear the range to use presets.</p>
+      ) : null}
     </FilterPopoverShell>
   );
 }
@@ -245,8 +292,8 @@ export function ZillowRealtorPopover({ value, onChange }: { value: ZillowRealtor
           <div key={k} className="relative flex-1">
             {prefix && <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-neutral-400">{prefix}</span>}
             <input
-              value={draft[key][k]}
-              onChange={(e) => setDraft({ ...draft, [key]: { ...draft[key], [k]: e.target.value } })}
+              value={prefix === "$" ? withCommas(draft[key][k]) : draft[key][k]}
+              onChange={(e) => setDraft({ ...draft, [key]: { ...draft[key], [k]: prefix === "$" ? stripCommas(e.target.value) : e.target.value } })}
               inputMode="numeric"
               placeholder={k === "min" ? "Min" : "Max"}
               className={cn("h-9 w-full rounded-lg border border-neutral-300 text-sm placeholder:text-neutral-400 focus:border-neutral-400 focus:outline-none", prefix ? "pl-7 pr-3" : "px-3")}
@@ -323,14 +370,24 @@ interface OrchClient {
   lead_count: number;
 }
 
-export function ClientPopover({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+export function ClientPopover({
+  value,
+  clientMode,
+  onChange,
+}: {
+  value: string;
+  clientMode: "include" | "exclude";
+  onChange: (id: string, mode: "include" | "exclude") => void;
+}) {
   const [open, setOpen] = useState(false);
   const [sel, setSel] = useState(value);
+  const [mode, setMode] = useState<"include" | "exclude">(clientMode);
   const [clients, setClients] = useState<OrchClient[] | null>(null);
 
   useEffect(() => {
     if (open) {
       setSel(value);
+      setMode(clientMode);
       if (clients === null) {
         // only clients whose leads are up for review (orchestrator sets leads_inreview)
         fetch("/api/orch/clients?inReview=1")
@@ -349,12 +406,21 @@ export function ClientPopover({ value, onChange }: { value: string; onChange: (v
       open={open}
       onOpenChange={setOpen}
       width="w-80"
-      onClear={() => setSel("")}
+      onClear={() => {
+        setSel("");
+        setMode("include");
+      }}
       onApply={() => {
-        onChange(sel);
+        onChange(sel, mode);
         setOpen(false);
       }}
     >
+      {/* Include = only this client's leads; Exclude = everyone but them (skip agents already
+          built for that client). */}
+      <div className="mb-3 flex items-center gap-6">
+        <Radio label="Include" on={mode === "include"} onClick={() => setMode("include")} />
+        <Radio label="Exclude" on={mode === "exclude"} onClick={() => setMode("exclude")} />
+      </div>
       <div className="max-h-64 space-y-1 overflow-auto">
         {clients === null ? (
           <p className="py-4 text-center text-sm text-neutral-400">Loading…</p>
@@ -382,6 +448,48 @@ export function ClientPopover({ value, onChange }: { value: string; onChange: (v
             );
           })
         )}
+      </div>
+    </FilterPopoverShell>
+  );
+}
+
+// ---------- Missing contact info (agents MISSING the checked contact fields) ----------
+export function MissingContactPopover({
+  value,
+  onChange,
+}: {
+  value: { email: boolean; phone: boolean };
+  onChange: (v: { email: boolean; phone: boolean }) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState(value);
+  useEffect(() => {
+    if (open) setDraft(value);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  const count = (value.email ? 1 : 0) + (value.phone ? 1 : 0);
+  return (
+    <FilterPopoverShell
+      label="Missing contact"
+      count={count}
+      open={open}
+      onOpenChange={setOpen}
+      width="w-72"
+      onClear={() => setDraft({ email: false, phone: false })}
+      onApply={() => {
+        onChange(draft);
+        setOpen(false);
+      }}
+    >
+      <p className="mb-2 text-xs text-neutral-500">Show agents missing the checked contact info (both = missing both).</p>
+      <div className="space-y-2">
+        {([["email", "No email address"], ["phone", "No phone number"]] as const).map(([k, lbl]) => (
+          <label key={k} className="flex items-center gap-2 text-sm text-neutral-800">
+            <Checkbox checked={draft[k]} onCheckedChange={() => setDraft({ ...draft, [k]: !draft[k] })} />
+            {lbl}
+          </label>
+        ))}
       </div>
     </FilterPopoverShell>
   );
