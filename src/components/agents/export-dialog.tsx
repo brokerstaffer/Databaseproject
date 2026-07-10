@@ -47,6 +47,7 @@ export function ExportDialog({
   mode?: SearchMode;
 }) {
   const [method, setMethod] = useState<"campaign" | "csv">("campaign");
+  const [sourcePriority, setSourcePriority] = useState<"courted" | "zillow" | "realtor">("courted");
   const [clients, setClients] = useState<ClientOpt[]>([]);
   const [clientId, setClientId] = useState("");
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
@@ -131,7 +132,7 @@ export function ExportDialog({
     const res = await fetch("/api/enrichment/send", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...reqBody(), orchClientId: clientId, campaignId: campaign.bison_id, campaignName: campaign.name ?? null }),
+      body: JSON.stringify({ ...reqBody(), orchClientId: clientId, campaignId: campaign.bison_id, campaignName: campaign.name ?? null, sourcePriority }),
     });
     setBusy(false);
     const j = await res.json().catch(() => ({}));
@@ -234,6 +235,28 @@ export function ExportDialog({
                     ))}
                   </SelectContent>
                 </Select>
+              </div>
+              <div>
+                <label className="text-sm font-medium text-neutral-700">Data priority</label>
+                <div className="mt-1.5 grid grid-cols-3 gap-2">
+                  {([["courted", "Courted"], ["zillow", "Zillow"], ["realtor", "Realtor"]] as const).map(([s, lbl]) => (
+                    <button
+                      key={s}
+                      type="button"
+                      onClick={() => setSourcePriority(s)}
+                      className={cn(
+                        "rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors",
+                        sourcePriority === s ? "border-neutral-900 bg-neutral-900 text-white" : "border-neutral-300 text-neutral-700 hover:bg-neutral-50"
+                      )}
+                    >
+                      {lbl}
+                    </button>
+                  ))}
+                </div>
+                <p className="mt-1 text-xs text-neutral-500">
+                  Which source’s values win for the lead fields — blanks fall back to the next source
+                  ({sourcePriority === "courted" ? "Courted → Zillow → Realtor" : sourcePriority === "zillow" ? "Zillow → Courted → Realtor" : "Realtor → Courted → Zillow"}).
+                </p>
               </div>
               <p className="text-xs text-neutral-500">
                 Each agent is enriched (email found + verified), leads already in this client’s campaigns are skipped, and the rest are

@@ -40,8 +40,17 @@ export interface Agent {
   avg_rental_price: number | null;
   active_listings: number | null;
   pending_listings: number | null;
+  // Zillow/Realtor-only fields (all-time stats + extras — separate from LTM metrics)
+  linkedin_url?: string | null;
+  languages?: string[] | null;
+  total_sales_all_time?: number | null;
+  avg_price_all_time?: number | null;
+  avg_sales_volume_all_time?: number | null;
+  price_range?: string | null;
+  other_licenses?: string | null;
   mls: AgentMls[] | null;
-  source_stats?: { source: string; sales_volume: number | null; units: number | null }[] | null;
+  // one entry per matched source with EVERY agent_source_stats metric (see migration 0019)
+  source_stats?: ({ source: string } & Record<string, number | string | null>)[] | null;
   // office-mode rows (when mode = "office")
   agent_names?: string[] | null;
   agent_count?: number | null;

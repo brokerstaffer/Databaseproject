@@ -28,6 +28,18 @@ export interface OfficeSearchFilter {
   brand: IncludeExclude;
   office: IncludeExclude;
 }
+export interface MinMax {
+  min: string;
+  max: string;
+}
+// Grouped filter over the Zillow/Realtor-only fields (one chip, everything inside).
+export interface ZillowRealtorFilter {
+  languages: string[];
+  totalSales: MinMax; // all-time
+  avgPriceAllTime: MinMax;
+  avgVolumeAllTime: MinMax;
+  hasLinkedin: boolean;
+}
 
 export interface Filters {
   location: LocationFilter;
@@ -46,6 +58,7 @@ export interface Filters {
   name: IncludeExclude; // full names (include/exclude)
   nameQuery: string; // free-text name search (top search bar)
   orchClientId: string; // orchestrator client (orch_clients.id) — "" = off
+  zillowRealtor: ZillowRealtorFilter;
 }
 
 export const DEFAULT_FILTERS: Filters = {
@@ -65,6 +78,7 @@ export const DEFAULT_FILTERS: Filters = {
   name: { include: [], exclude: [] },
   nameQuery: "",
   orchClientId: "",
+  zillowRealtor: { languages: [], totalSales: { min: "", max: "" }, avgPriceAllTime: { min: "", max: "" }, avgVolumeAllTime: { min: "", max: "" }, hasLinkedin: false },
 };
 
 // Bucket sets: { key } is sent to the RPC (must match fn_bucket_cond); { label } is displayed.
@@ -107,3 +121,6 @@ export const ieCount = (ie: IncludeExclude) => ie.include.length + ie.exclude.le
 export const rangeCount = (r: { buckets: string[]; min: string; max: string }) =>
   r.buckets.length + (r.min ? 1 : 0) + (r.max ? 1 : 0);
 export const officeSearchCount = (o: OfficeSearchFilter) => ieCount(o.brand) + ieCount(o.office);
+const mmCount = (m: MinMax) => (m.min ? 1 : 0) + (m.max ? 1 : 0);
+export const zillowRealtorCount = (z: ZillowRealtorFilter) =>
+  z.languages.length + mmCount(z.totalSales) + mmCount(z.avgPriceAllTime) + mmCount(z.avgVolumeAllTime) + (z.hasLinkedin ? 1 : 0);

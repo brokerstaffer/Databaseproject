@@ -21,6 +21,8 @@ export async function POST(req: NextRequest) {
 
   const body = await req.json().catch(() => ({}));
   const { orchClientId = null, clientId = null, campaignId = null, campaignName = null, mode = "agent", source = "courted", filters = {}, selectedIds, rangeFrom, rangeTo } = body ?? {};
+  // which source's values win for the merged lead fields (courted | zillow | realtor)
+  const sourcePriority = ["courted", "zillow", "realtor"].includes(body?.sourcePriority) ? body.sourcePriority : "courted";
 
   let rows: Record<string, unknown>[] = [];
   try {
@@ -37,8 +39,8 @@ export async function POST(req: NextRequest) {
   try {
     await dbc.query("begin");
     const batch = await dbc.query(
-      `insert into enrichment_batches (client_id, orch_client_id, campaign_id, campaign_name, total, created_by, filters)
-       values ($1, $2, $3, $4, $5, $6, $7::jsonb) returning id`,
+      `insert into enrichment_batches (client_id, orch_client_id, campaign_id, campaign_name, total, created_by, filters, source_priority)
+       values ($1, $2, $3, $4, $5, $6, $7::jsonb, $8) returning id`,
       [
         clientId,
         orchClientId || (filters as Record<string, unknown>)?.orchClientId || null,
@@ -47,6 +49,7 @@ export async function POST(req: NextRequest) {
         agentIds.length,
         user.id,
         JSON.stringify({ filters, mode, source, selectedCount: Array.isArray(selectedIds) ? selectedIds.length : 0, rangeFrom: rangeFrom ?? null, rangeTo: rangeTo ?? null }),
+        sourcePriority,
       ]
     );
     batchId = batch.rows[0].id;

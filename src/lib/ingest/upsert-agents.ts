@@ -83,8 +83,19 @@ function expandMoney(raw: unknown): number | undefined {
   else if (u === "B") n *= 1e9;
   return Number.isFinite(n) ? Math.round(n) : undefined;
 }
+// "English, Spanish; Portuguese / French" -> ["English","Spanish","Portuguese","French"]
+function splitList(raw: unknown): string[] | undefined {
+  const s = txt(raw);
+  if (!s) return undefined;
+  const arr = s.split(/[,;|/]/).map((x) => x.trim()).filter(Boolean);
+  return arr.length ? arr : undefined;
+}
 // Translate a Realtor/Zillow row into the canonical Courted-style keys the upsert reads,
 // so the scraper can POST each source's native columns. (Courted rows pass through.)
+// Field policy (spec CSV "Zillow_Realtor.com vs Courted - Fields"):
+//   merged=Yes  -> canonical Courted keys (Name, Office, Email, tenure, City->Most Transacted…)
+//   merged=No   -> their own keys (LinkedIn, all-time stats, languages…) — separate columns,
+//                  because these are ALL-TIME numbers vs Courted's last-12-months metrics.
 function remapRow(raw: Row, source: string): Row {
   if (source === "realtor") {
     return {
@@ -93,10 +104,20 @@ function remapRow(raw: Row, source: string): Row {
       "Email": raw["Email"], "Phone": raw["Phone"], "Mobile Phone": raw["Mobile Phone"],
       "Office": raw["Office"],
       "Office City": raw["Office City"], "Office State": raw["Office State"], "Office Zip": raw["Office Postal"], "Office Address": raw["Office Address"],
+      "Most Transacted City": raw["City"],
       "Years Of Experience": raw["Years Of Experience"],
       "Agent Tenure (mos)": yearsToMos(raw["Years Of Experience"]),
+      "LTM Closed Transactions": raw["Sales Count Last Year"],
       "Active Listings": raw["For Sale Count"],
       "Profile Photo URL": raw["Profile Photo URL"],
+      "Profile URL": raw["Realtor Profile URL"] ?? raw["Profile URL"],
+      "LinkedIn URL": raw["LinkedIn URL"] ?? raw["LinkedIn"] ?? raw["Linkedin"],
+      "Languages Spoken": raw["Languages Spoken"] ?? raw["Languages"],
+      "Total Sales All Time": raw["Total Sales"] ?? raw["Total Sales Count"],
+      "Average Price All Time": expandMoney(raw["Average Price All Time"] ?? raw["Average Price"]),
+      "Average Sales Volume All Time": expandMoney(raw["Average Sales Volume All Time"] ?? raw["Average Sales Volume"]),
+      "Price Range": raw["Price Range"],
+      "Other Licenses": raw["Other licenses"] ?? raw["Other Licenses"] ?? raw["All Licenses"],
     };
   }
   if (source === "zillow") {
@@ -105,13 +126,23 @@ function remapRow(raw: Row, source: string): Row {
       "State License": raw["License Number"],
       "Email": raw["Email"], "Phone": raw["Phone"],
       "Office": raw["Brokerage"], "Office Address": raw["Brokerage Address"],
+      // Zillow's City/State/Zip = the agent's service area -> Most Transacted (spec). They also
+      // key/describe the OFFICE row (so brokerages stay partitioned per metro instead of one
+      // nationwide mega-office); prepare() keeps them OFF the agent's own office_* columns.
+      "Most Transacted City": raw["City"], "Most Transacted State": raw["State"], "Most Transacted Zip": raw["Zip Code"],
       "Office City": raw["City"], "Office State": raw["State"], "Office Zip": raw["Zip Code"],
       "Years Of Experience": raw["Years of Experience"],
       "Agent Tenure (mos)": yearsToMos(raw["Years of Experience"]),
-      "LTM Avg Sale Price": expandMoney(raw["Average Price"]),
       "LTM Closed Transactions": raw["Sales Count Last Year"],
       "Active Listings": raw["Active Listings Count"],
       "Profile Photo URL": raw["Profile Photo URL"],
+      "Profile URL": raw["Zillow Profile URL"],
+      "LinkedIn URL": raw["LinkedIn URL"],
+      "Languages Spoken": raw["Languages Spoken"],
+      "Total Sales All Time": raw["Total Sales Count"],
+      "Average Price All Time": expandMoney(raw["Average Price"]), // all-time — kept OUT of LTM avg sale price
+      "Average Sales Volume All Time": expandMoney(raw["Average Sales Volume"]),
+      "Other Licenses": raw["All Licenses"],
     };
   }
   return raw; // courted: already canonical
@@ -137,8 +168,25 @@ const AGENT_COLS: [string, string][] = [
   ["approx_gci", "numeric"], ["avg_sale_price", "numeric"], ["closed_transactions", "numeric"], ["units", "numeric"],
   ["buy_side_count", "numeric"], ["list_side_count", "numeric"], ["closed_rentals", "numeric"], ["avg_rental_price", "numeric"],
   ["active_listings", "integer"], ["pending_listings", "integer"], ["title", "text"],
+  ["linkedin_url", "text"], ["languages", "text[]"], ["total_sales_all_time", "numeric"],
+  ["avg_price_all_time", "numeric"], ["avg_sales_volume_all_time", "numeric"],
+  ["price_range", "text"], ["other_licenses", "text"],
   ["match_key", "text"], ["match_confidence", "text"],
 ];
+// Zillow/Realtor-only columns (spec: merged=No) — those sources own them; new value wins.
+const SOURCE_ONLY_COLS = new Set([
+  "linkedin_url", "languages", "total_sales_all_time", "avg_price_all_time",
+  "avg_sales_volume_all_time", "price_range", "other_licenses",
+]);
+// Spec merged=Yes fields: on a CROSS-SOURCE match these only FILL BLANKS — Courted stays the
+// primary source; the incoming source's own values are kept in source_ids for the breakdown.
+const MERGE_FILL_COLS = new Set([
+  "full_name", "first_name", "last_name", "license_number", "preferred_email", "preferred_phone",
+  "brand", "office_name", "office_id", "office_city", "office_zip", "office_state",
+  "est_time_in_industry_months", "est_time_in_industry_raw",
+  "most_transacted_city", "most_transacted_zip", "transacted_state",
+  "closed_transactions", "active_listings",
+]);
 const STAT_COLS: [string, string][] = [
   ["sales_volume", "numeric"], ["prev_sales_volume", "numeric"], ["pct_change", "numeric"], ["approx_gci", "numeric"],
   ["avg_sale_price", "numeric"], ["closed_transactions", "numeric"], ["units", "numeric"], ["buy_side_count", "numeric"],
@@ -202,8 +250,14 @@ export async function upsertAgentRows(client: PoolClient, rows: Row[], source: s
     const courtedRaw: Record<string, unknown> = {
       agent_id: txt(r["Courted Agent ID"]),
       id: txt(r["Courted ID"]),
-      profile_url: txt(r["Courted Profile URL"]),
+      profile_url: txt(r["Courted Profile URL"]) || txt(r["Profile URL"]),
       profile_photo_url: txt(r["Profile Photo URL"]),
+      // every source keeps its OWN contact/city/office values here, so the app can show both
+      // values when sources differ AND campaign sends can resolve fields by source priority.
+      email: email || undefined,
+      phone: phone || undefined,
+      city: txt(r["Most Transacted City"]),
+      office_name: officeName || undefined,
       nickname: txt(r["Nickname"]),
       mobile_phone: txt(r["Mobile Phone"]) && txt(r["Mobile Phone"]) !== phone ? txt(r["Mobile Phone"]) : undefined,
       is_new_agent: yn(r["Is New Agent"]),
@@ -231,7 +285,11 @@ export async function upsertAgentRows(client: PoolClient, rows: Row[], source: s
       est_time_at_office_months: num(r["Time At Current Office (mos)"]),
       avg_time_at_office_months: num(r["Avg Time At Office (mos)"]),
       home_city: txt(r["Home City"]), home_zip: txt(r["Home Zip"]), home_state: txt(r["Home State"]), home_address: txt(r["Home Address"]),
-      office_city: officeCity, office_zip: officeZip, office_state: officeState,
+      // zillow: officeCity/Zip/State describe the service area (used only for office identity) —
+      // the agent's own office location stays unknown per the field spec
+      office_city: source === "zillow" ? null : officeCity,
+      office_zip: source === "zillow" ? null : officeZip,
+      office_state: source === "zillow" ? null : officeState,
       most_transacted_city: txt(r["Most Transacted City"]), most_transacted_zip: txt(r["Most Transacted Zip"]), transacted_state: txt(r["Most Transacted State"]),
       sales_volume: money(r["LTM Sales Volume"]), pct_change: pct(r["Sales Volume Change %"]),
       buy_side_dollar: money(r["LTM Sales Volume Buy-Side"]), list_side_dollar: money(r["LTM Sales Volume List-Side"]),
@@ -240,6 +298,11 @@ export async function upsertAgentRows(client: PoolClient, rows: Row[], source: s
       buy_side_count: num(r["LTM Units Buy-Side"]), list_side_count: num(r["LTM Units List-Side"]),
       closed_rentals: num(r["LTM Rental Count"]), avg_rental_price: money(r["LTM Avg Rental Price"]),
       active_listings: intval(r["Active Listings"]), pending_listings: intval(r["Pending Listings"]),
+      linkedin_url: txt(r["LinkedIn URL"]), languages: splitList(r["Languages Spoken"]),
+      total_sales_all_time: num(r["Total Sales All Time"]),
+      avg_price_all_time: num(r["Average Price All Time"]),
+      avg_sales_volume_all_time: num(r["Average Sales Volume All Time"]),
+      price_range: txt(r["Price Range"]), other_licenses: txt(r["Other Licenses"]),
       title: deriveTitle(r), match_key: mkey, match_confidence: mconf,
     };
     const stat: Record<string, unknown> = {
@@ -403,7 +466,24 @@ export async function upsertAgentRows(client: PoolClient, rows: Row[], source: s
       );
     }
     if (updateRows.length) {
-      const setClause = AGENT_COLS.map(([n]) => `${n} = x.${n}`).join(", ");
+      // Merge policy on matched agents:
+      //   courted row        -> authoritative refresh of every field (source-only cols kept)
+      //   zillow/realtor row -> merged=Yes fields fill blanks only WHEN the agent has courted
+      //                         data (courted stays primary); on a zillow/realtor-ONLY agent a
+      //                         re-scrape must refresh normally (new value wins) or the agent
+      //                         would be frozen at its first-scrape values forever. Their own
+      //                         columns always take the new value, and NOTHING else is touched —
+      //                         a Zillow refresh can never null out Courted metrics.
+      const setClause = AGENT_COLS
+        .filter(([n]) => source === "courted" || SOURCE_ONLY_COLS.has(n) || MERGE_FILL_COLS.has(n))
+        .map(([n]) => {
+          if (SOURCE_ONLY_COLS.has(n)) return `${n} = coalesce(x.${n}, a.${n})`;
+          if (source !== "courted" && MERGE_FILL_COLS.has(n)) {
+            return `${n} = case when 'courted' = any(coalesce(a.sources, array[]::text[])) then coalesce(a.${n}, x.${n}) else coalesce(x.${n}, a.${n}) end`;
+          }
+          return `${n} = x.${n}`;
+        })
+        .join(", ");
       await client.query(
         `update agents a set ${setClause},
            sources = (select array_agg(distinct s) from unnest(coalesce(a.sources, array[]::text[]) || array[$2]::text[]) s),

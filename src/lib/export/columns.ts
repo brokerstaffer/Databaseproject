@@ -66,6 +66,14 @@ export const EXPORT_COLUMNS: ExportCol[] = [
   { key: "avg_rental_price", label: "Avg. rental price" },
   { key: "preferred_email", label: "Preferred email" },
   { key: "preferred_phone", label: "Preferred phone" },
+  // Zillow/Realtor-only fields (all-time stats + extras)
+  { key: "linkedin_url", label: "LinkedIn" },
+  { key: "languages", label: "Languages" },
+  { key: "total_sales_all_time", label: "Total sales (all time)" },
+  { key: "avg_price_all_time", label: "Avg. price (all time)" },
+  { key: "avg_sales_volume_all_time", label: "Avg. sales volume (all time)" },
+  { key: "price_range", label: "Price range" },
+  { key: "other_licenses", label: "Other licenses" },
 ];
 
 export const EXPORT_VALUE: Record<string, (r: Row) => unknown> = {
@@ -98,6 +106,13 @@ export const EXPORT_VALUE: Record<string, (r: Row) => unknown> = {
   avg_rental_price: (r) => money(r.avg_rental_price),
   preferred_email: (r) => r.preferred_email,
   preferred_phone: (r) => r.preferred_phone,
+  linkedin_url: (r) => r.linkedin_url,
+  languages: (r) => (Array.isArray(r.languages) ? (r.languages as string[]).join(" | ") : ""),
+  total_sales_all_time: (r) => r.total_sales_all_time,
+  avg_price_all_time: (r) => money(r.avg_price_all_time),
+  avg_sales_volume_all_time: (r) => money(r.avg_sales_volume_all_time),
+  price_range: (r) => r.price_range,
+  other_licenses: (r) => r.other_licenses,
 };
 
 // Canonical-ordered, validated subset of keys (defaults to all when none chosen).

@@ -12,14 +12,14 @@ import {
 } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import type { Agent, SearchResponse, SortDir, SearchMode, DataSource } from "@/types/agent";
-import { RangePopover, TitlePopover, ClientPopover } from "./agent-filters";
+import { RangePopover, TitlePopover, ClientPopover, ZillowRealtorPopover } from "./agent-filters";
 import { LocationPopover, OfficeSearchPopover, MlsPopover, LicensePopover, NamePopover } from "./agent-typeahead-filters";
 import { ExportDialog } from "./export-dialog";
 import { SavedViews } from "./saved-views";
 import { EditColumnsModal } from "./edit-columns";
 import { AllFiltersDrawer } from "./all-filters-drawer";
 import { OfficeProfile } from "./office-profile";
-import { DEFAULT_FILTERS, SALES_VOLUME_BUCKETS, COUNT_BUCKETS, YEAR_BUCKETS, GCI_BUCKETS, ieCount, rangeCount, officeSearchCount } from "@/types/agent-filters";
+import { DEFAULT_FILTERS, SALES_VOLUME_BUCKETS, COUNT_BUCKETS, YEAR_BUCKETS, GCI_BUCKETS, ieCount, rangeCount, officeSearchCount, zillowRealtorCount } from "@/types/agent-filters";
 import type { Filters } from "@/types/agent-filters";
 import { useNameSearch } from "@/lib/stores/name-search";
 
@@ -55,17 +55,24 @@ function PctChange({ n }: { n: number | null | undefined }) {
   if (n == null) return <span className="text-neutral-400">N/A</span>;
   return <span className={n >= 0 ? "text-emerald-600" : "text-red-600"}>{`${n >= 0 ? "+" : ""}${n.toLocaleString()}%`}</span>;
 }
-// Sales volume, with a per-source breakdown when the agent is matched across sources.
-function VolCell({ a }: { a: Agent }) {
+// Metric cell with a per-source breakdown when the agent is matched across sources AND the
+// sources disagree. Identical values collapse to the single number; a source missing the
+// metric shows as N/A (matches the Courted-style reference screenshot).
+function StatCell({ a, field, fmt }: { a: Agent; field: string; fmt: (v: number | null | undefined) => React.ReactNode }) {
   const stats = a.source_stats ?? [];
+  let breakdown: typeof stats = [];
+  if (stats.length > 1) {
+    const uniq = new Set(stats.map((s) => JSON.stringify(s[field] ?? null)));
+    if (uniq.size > 1) breakdown = stats; // values differ (incl. value vs N/A) -> show all
+  }
   return (
     <div>
-      <div>{usd(a.sales_volume)}</div>
-      {stats.length > 1 && (
+      <div>{fmt(a[field] as number | null | undefined)}</div>
+      {breakdown.length > 0 && (
         <div className="mt-0.5 space-y-0.5">
-          {stats.map((s) => (
+          {breakdown.map((s) => (
             <div key={s.source} className="text-[11px] capitalize text-neutral-400">
-              {s.source}: {usd(s.sales_volume)}
+              {s.source}: {fmt(s[field] as number | null | undefined)}
             </div>
           ))}
         </div>
@@ -98,20 +105,32 @@ const COLUMNS: Col[] = [
   { key: "timeOffice", label: "Est. time at office", render: (a) => ym(a.est_time_at_office_months) },
   { key: "avgTimeOffice", label: "Avg. time at office", render: (a) => ym(a.avg_time_at_office_months) },
   { key: "transacted", label: "Most transacted city", render: (a) => (a.most_transacted_city ? `${a.most_transacted_city}${a.transacted_state ? `, ${a.transacted_state}` : ""}` : "N/A") },
-  { key: "vol", label: "Sales volume", sortBy: "sales_volume", align: "right", render: (a) => <VolCell a={a} /> },
-  { key: "pct", label: "% Change", align: "right", render: (a) => <PctChange n={a.pct_change} /> },
-  { key: "buy$", label: "Buy-side ($)", align: "right", render: (a) => usd(a.buy_side_dollar) },
-  { key: "list$", label: "List-side ($)", align: "right", render: (a) => usd(a.list_side_dollar) },
-  { key: "gci", label: "Approx. GCI", align: "right", render: (a) => usd(a.approx_gci) },
-  { key: "avgPrice", label: "Avg. sales price", sortBy: "avg_sale_price", align: "right", render: (a) => usd(a.avg_sale_price) },
-  { key: "closedTx", label: "Closed transactions", sortBy: "closed_transactions", align: "right", render: (a) => numv(a.closed_transactions) },
-  { key: "units", label: "Units", sortBy: "units", align: "right", render: (a) => numv(a.units) },
-  { key: "buyN", label: "Buy-side (#)", align: "right", render: (a) => numv(a.buy_side_count) },
-  { key: "listN", label: "List-side (#)", align: "right", render: (a) => numv(a.list_side_count) },
-  { key: "rentals", label: "Closed rentals", align: "right", render: (a) => numv(a.closed_rentals) },
-  { key: "avgRent", label: "Avg. rental price", align: "right", render: (a) => usd(a.avg_rental_price) },
+  { key: "vol", label: "Sales volume", sortBy: "sales_volume", align: "right", render: (a) => <StatCell a={a} field="sales_volume" fmt={usd} /> },
+  { key: "pct", label: "% Change", align: "right", render: (a) => <StatCell a={a} field="pct_change" fmt={(n) => <PctChange n={n} />} /> },
+  { key: "buy$", label: "Buy-side ($)", align: "right", render: (a) => <StatCell a={a} field="buy_side_dollar" fmt={usd} /> },
+  { key: "list$", label: "List-side ($)", align: "right", render: (a) => <StatCell a={a} field="list_side_dollar" fmt={usd} /> },
+  { key: "gci", label: "Approx. GCI", align: "right", render: (a) => <StatCell a={a} field="approx_gci" fmt={usd} /> },
+  { key: "avgPrice", label: "Avg. sales price", sortBy: "avg_sale_price", align: "right", render: (a) => <StatCell a={a} field="avg_sale_price" fmt={usd} /> },
+  { key: "closedTx", label: "Closed transactions", sortBy: "closed_transactions", align: "right", render: (a) => <StatCell a={a} field="closed_transactions" fmt={numv} /> },
+  { key: "units", label: "Units", sortBy: "units", align: "right", render: (a) => <StatCell a={a} field="units" fmt={numv} /> },
+  { key: "buyN", label: "Buy-side (#)", align: "right", render: (a) => <StatCell a={a} field="buy_side_count" fmt={numv} /> },
+  { key: "listN", label: "List-side (#)", align: "right", render: (a) => <StatCell a={a} field="list_side_count" fmt={numv} /> },
+  { key: "rentals", label: "Closed rentals", align: "right", render: (a) => <StatCell a={a} field="closed_rentals" fmt={numv} /> },
+  { key: "avgRent", label: "Avg. rental price", align: "right", render: (a) => <StatCell a={a} field="avg_rental_price" fmt={usd} /> },
   { key: "email", label: "Preferred email address", render: (a) => na(a.preferred_email) },
   { key: "phone", label: "Preferred phone number", render: (a) => phoneFmt(a.preferred_phone) },
+  // Zillow/Realtor-only fields (all-time stats + extras — separate from the LTM metrics)
+  { key: "linkedin", label: "LinkedIn", render: (a) => {
+      if (!a.linkedin_url) return <span className="text-neutral-400">N/A</span>;
+      const url = String(a.linkedin_url);
+      return <a href={/^https?:\/\//i.test(url) ? url : `https://${url}`} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">Profile</a>;
+    } },
+  { key: "languages", label: "Languages", render: (a) => ((a.languages as string[] | null)?.length ? (a.languages as string[]).join(", ") : "N/A") },
+  { key: "totalSalesAT", label: "Total sales (all time)", align: "right", render: (a) => numv(a.total_sales_all_time as number | null) },
+  { key: "avgPriceAT", label: "Avg. price (all time)", align: "right", render: (a) => usd(a.avg_price_all_time as number | null) },
+  { key: "avgVolAT", label: "Avg. sales volume (all time)", align: "right", render: (a) => usd(a.avg_sales_volume_all_time as number | null) },
+  { key: "priceRange", label: "Price range", render: (a) => na(a.price_range as string | null) },
+  { key: "otherLic", label: "Other licenses", render: (a) => na(a.other_licenses as string | null) },
 ];
 
 const DEFAULT_COL_ORDER = COLUMNS.map((c) => c.key);
@@ -208,7 +227,8 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
     rangeCount(filters.estTimeInOffice) +
     rangeCount(filters.avgTimeAtOffice) +
     ieCount(filters.name) +
-    (filters.orchClientId ? 1 : 0);
+    (filters.orchClientId ? 1 : 0) +
+    zillowRealtorCount(filters.zillowRealtor ?? DEFAULT_FILTERS.zillowRealtor);
   // The top-bar search is a find/highlight tool, not a filter — so it does not count here.
 
   function setF<K extends keyof Filters>(k: K, v: Filters[K]) {
@@ -347,6 +367,7 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
           <RangePopover label="Closed transactions" hasSide prefix="#" buckets={COUNT_BUCKETS} value={filters.closedTransactions} onChange={(v) => setF("closedTransactions", v)} />
           <RangePopover label="Est. time in industry" suffix="yrs" buckets={YEAR_BUCKETS} value={{ side: "all", ...filters.estTimeInIndustry }} onChange={(v) => setF("estTimeInIndustry", { buckets: v.buckets, min: v.min, max: v.max })} />
           <RangePopover label="Approx. GCI" prefix="$" buckets={GCI_BUCKETS} value={{ side: "all", ...filters.approxGci }} onChange={(v) => setF("approxGci", { buckets: v.buckets, min: v.min, max: v.max })} />
+          <ZillowRealtorPopover value={filters.zillowRealtor ?? DEFAULT_FILTERS.zillowRealtor} onChange={(v) => setF("zillowRealtor", v)} />
           <button
             type="button"
             onClick={() => setAllFiltersOpen(true)}

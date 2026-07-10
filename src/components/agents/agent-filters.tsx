@@ -215,6 +215,106 @@ export function RangePopover({
   );
 }
 
+// ---------- Zillow / Realtor extras (one chip, all five controls inside) ----------
+import type { ZillowRealtorFilter } from "@/types/agent-filters";
+import { zillowRealtorCount } from "@/types/agent-filters";
+
+export function ZillowRealtorPopover({ value, onChange }: { value: ZillowRealtorFilter; onChange: (v: ZillowRealtorFilter) => void }) {
+  const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState<ZillowRealtorFilter>(value);
+  const [langInput, setLangInput] = useState("");
+
+  useEffect(() => {
+    if (open) {
+      setDraft(value);
+      setLangInput("");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  const addLang = () => {
+    const v = langInput.trim();
+    if (v && !draft.languages.includes(v)) setDraft({ ...draft, languages: [...draft.languages, v] });
+    setLangInput("");
+  };
+  const mm = (label: string, key: "totalSales" | "avgPriceAllTime" | "avgVolumeAllTime", prefix?: string) => (
+    <div>
+      <div className="mb-1 text-xs font-medium text-neutral-500">{label}</div>
+      <div className="flex items-center gap-2">
+        {(["min", "max"] as const).map((k) => (
+          <div key={k} className="relative flex-1">
+            {prefix && <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-neutral-400">{prefix}</span>}
+            <input
+              value={draft[key][k]}
+              onChange={(e) => setDraft({ ...draft, [key]: { ...draft[key], [k]: e.target.value } })}
+              inputMode="numeric"
+              placeholder={k === "min" ? "Min" : "Max"}
+              className={cn("h-9 w-full rounded-lg border border-neutral-300 text-sm placeholder:text-neutral-400 focus:border-neutral-400 focus:outline-none", prefix ? "pl-7 pr-3" : "px-3")}
+            />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+
+  return (
+    <FilterPopoverShell
+      label="Zillow / Realtor"
+      count={zillowRealtorCount(value)}
+      open={open}
+      onOpenChange={setOpen}
+      width="w-96"
+      onClear={() => setDraft({ languages: [], totalSales: { min: "", max: "" }, avgPriceAllTime: { min: "", max: "" }, avgVolumeAllTime: { min: "", max: "" }, hasLinkedin: false })}
+      onApply={() => {
+        // commit any language still sitting in the input (typed but Enter not pressed)
+        const pending = langInput.trim();
+        const languages = pending && !draft.languages.includes(pending) ? [...draft.languages, pending] : draft.languages;
+        onChange({ ...draft, languages });
+        setOpen(false);
+      }}
+    >
+      <div className="space-y-4">
+        <div>
+          <div className="mb-1 text-xs font-medium text-neutral-500">Languages spoken</div>
+          <input
+            value={langInput}
+            onChange={(e) => setLangInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                addLang();
+              }
+            }}
+            placeholder="Type a language and press Enter (e.g. Spanish)"
+            className="h-9 w-full rounded-lg border border-neutral-300 px-3 text-sm placeholder:text-neutral-400 focus:border-neutral-400 focus:outline-none"
+          />
+          {draft.languages.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {draft.languages.map((l) => (
+                <span key={l} className="inline-flex items-center gap-1 rounded-md bg-neutral-100 px-2 py-1 text-xs text-neutral-800">
+                  {l}
+                  <button type="button" onClick={() => setDraft({ ...draft, languages: draft.languages.filter((x) => x !== l) })} className="text-neutral-400 hover:text-neutral-700">
+                    ×
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+        {mm("Total sales (all time)", "totalSales", "#")}
+        {mm("Avg. price (all time)", "avgPriceAllTime", "$")}
+        {mm("Avg. sales volume (all time)", "avgVolumeAllTime", "$")}
+        <div className="flex items-center gap-2 text-sm text-neutral-800">
+          <Checkbox checked={draft.hasLinkedin} onCheckedChange={() => setDraft({ ...draft, hasLinkedin: !draft.hasLinkedin })} />
+          <button type="button" onClick={() => setDraft({ ...draft, hasLinkedin: !draft.hasLinkedin })}>
+            Has LinkedIn profile
+          </button>
+        </div>
+      </div>
+    </FilterPopoverShell>
+  );
+}
+
 // ---------- Client (orchestrator client — narrows to the agents built for that client) ----------
 interface OrchClient {
   id: string;

@@ -179,6 +179,40 @@ async function leadUsedByClient(lead, clientName) {
 }
 
 // ---------------------------------------------------------------------------
+// Source priority — which source's values win for the merged lead fields; blanks fall
+// back down the order. Per-source values live in agents.source_ids (email/phone/city/
+// office_name/profile_url) and agent_source_stats; older courted rows predate the stash,
+// so 'courted' falls back to the canonical columns (which are courted-authoritative).
+// ---------------------------------------------------------------------------
+const PRIORITY_ORDERS = {
+  courted: ["courted", "zillow", "realtor"],
+  zillow: ["zillow", "courted", "realtor"],
+  realtor: ["realtor", "courted", "zillow"],
+};
+const orderFor = (priority) => PRIORITY_ORDERS[priority] ?? PRIORITY_ORDERS.courted;
+
+function srcVal(agent, src, key, canonicalKey) {
+  const v = agent.source_ids?.[src]?.[key];
+  if (v != null && v !== "") return v;
+  if (src === "courted" && (agent.sources ?? []).includes("courted")) return agent[canonicalKey] ?? null;
+  return null;
+}
+function byPriority(agent, order, key, canonicalKey) {
+  for (const src of order) {
+    const v = srcVal(agent, src, key, canonicalKey);
+    if (v != null && v !== "") return v;
+  }
+  return agent[canonicalKey] ?? null; // merged column as the last resort
+}
+function statByPriority(agent, order, key, canonicalKey) {
+  for (const src of order) {
+    const v = agent.stats_by_source?.[src]?.[key];
+    if (v != null) return v;
+  }
+  return agent[canonicalKey] ?? null;
+}
+
+// ---------------------------------------------------------------------------
 // Lead mapper — matches the Clay "Create or update lead" columns exactly (July 2026
 // screenshots): 12 custom variables, sent on EVERY lead (empty string when unknown, so
 // the variable always exists on the lead — Clay uses "PUT: replace all fields").
@@ -186,37 +220,34 @@ async function leadUsedByClient(lead, clientName) {
 const money = (v) => (v == null || v === "" ? "" : `$${Math.round(Number(v)).toLocaleString("en-US")}`);
 const num = (v) => (v == null ? "0" : String(v));
 const cityState = (city, st) => (city ? (st ? `${city}, ${st}` : city) : "");
-function profileUrl(sourceIds) {
-  const s = sourceIds ?? {};
-  return s.courted?.profile_url || s.realtor?.profile_url || s.zillow?.profile_url || "";
-}
 function splitName(full) {
   const parts = (full ?? "").trim().split(/\s+/);
   return { first: parts[0] || "Unknown", last: parts.slice(1).join(" ") || "-" };
 }
 
-export function mapAgentToBisonLead(agent, email, mlsCode) {
+export function mapAgentToBisonLead(agent, email, mlsCode, order = PRIORITY_ORDERS.courted) {
   const first = agent.first_name || splitName(agent.full_name).first;
   const last = agent.last_name || splitName(agent.full_name).last;
+  const profile = byPriority(agent, order, "profile_url", "__none__") ?? "";
   const vars = [
     ["buy-side", money(agent.buy_side_dollar)],
     ["list-side", money(agent.list_side_dollar)],
     ["office city", cityState(agent.office_city, agent.office_state)],
-    ["phone number", agent.preferred_phone ?? ""],
+    ["phone number", byPriority(agent, order, "phone", "preferred_phone") ?? ""],
     ["sales volume", money(agent.sales_volume)],
     ["estimated gci", money(agent.approx_gci)],
     ["closed rentals", num(agent.closed_rentals)],
-    ["courted profile", profileUrl(agent.source_ids)],
+    ["courted profile", profile],
     ["mls affiliation", mlsCode ?? ""],
-    ["top producing city", cityState(agent.most_transacted_city, agent.transacted_state)],
+    ["top producing city", cityState(byPriority(agent, order, "city", "most_transacted_city"), agent.transacted_state)],
     ["average sales price", money(agent.avg_sale_price)],
-    ["closed transactions", num(agent.closed_transactions)],
+    ["closed transactions", num(statByPriority(agent, order, "closed_transactions", "closed_transactions"))],
   ];
   return {
     first_name: first,
     last_name: last,
     email,
-    company: agent.office_name || agent.brand || undefined,
+    company: byPriority(agent, order, "office_name", "office_name") || agent.brand || undefined,
     custom_variables: vars.map(([name, value]) => ({ name, value })),
   };
 }
@@ -285,7 +316,9 @@ async function claim(fromStatus, toStatus, extraWhere = "") {
 async function loadAgents(agentIds) {
   const { rows } = await pool.query(
     `select a.*, (select m.code from agent_mls am join mls m on m.id = am.mls_id
-                   where am.agent_id = a.id limit 1) as mls_code
+                   where am.agent_id = a.id limit 1) as mls_code,
+            (select jsonb_object_agg(s.source, to_jsonb(s) - 'agent_id')
+               from agent_source_stats s where s.agent_id = a.id) as stats_by_source
        from agents a where a.id = any($1::uuid[])`,
     [agentIds]
   );
@@ -384,6 +417,12 @@ async function enrichCycle() {
   const { token, items } = await claim("pending", "enriching");
   if (items.length === 0) return false;
   const agents = await loadAgents(items.map((i) => i.agent_id));
+  // the batch's source priority decides which source's email the enrichment flow verifies first
+  const { rows: eBatches } = await pool.query(
+    `select id, source_priority from enrichment_batches where id = any($1::uuid[])`,
+    [[...new Set(items.map((i) => i.batch_id))]]
+  );
+  const priorityOf = new Map(eBatches.map((b) => [b.id, b.source_priority]));
 
   for (let n = 0; n < items.length; n++) {
     const item = items[n];
@@ -399,11 +438,16 @@ async function enrichCycle() {
     try {
       // Fresh cache read at use time: a sibling batch (or the other worker during a deploy)
       // may have enriched this same agent since our claim — never pay twice.
+      // 30-DAY TTL: results older than 30 days re-run the full pipeline (emails go stale,
+      // and an old not-found may find one now). Freshness comes from the DB clock — the same
+      // clock the cache-write guards use — so the two can never disagree.
       const { rows: [cache] } = await pool.query(
-        `select enriched_email, enriched_email_status, enriched_provider, enriched_at from agents where id = $1`,
+        `select enriched_email, enriched_email_status, enriched_provider, enriched_at,
+                (enriched_at is not null and enriched_at >= now() - interval '30 days') as cache_fresh
+           from agents where id = $1`,
         [agent.id]
       );
-      if (cache?.enriched_at) {
+      if (cache?.cache_fresh) {
         if (cache.enriched_email) {
           await setItem(item, token, {
             status: "enriched", attempts: 0, email: cache.enriched_email,
@@ -422,13 +466,17 @@ async function enrichCycle() {
       }
 
       const log = [];
-      const { hit, cleanRun } = await runEnrichment(agent, log);
+      // priority-resolved email: e.g. zillow priority verifies zillow's email first,
+      // falling back to courted's when zillow has none
+      const order = orderFor(priorityOf.get(item.batch_id));
+      const priorityEmail = byPriority(agent, order, "email", "preferred_email");
+      const { hit, cleanRun } = await runEnrichment({ ...agent, preferred_email: priorityEmail }, log);
       if (hit) {
         // The testing fallback must NEVER write the permanent cache — only real steps do.
         if (hit.provider !== "preferred_email") {
           await pool.query(
             `update agents set enriched_email=$1, enriched_email_status=$2, enriched_provider=$3, enriched_at=now()
-              where id=$4 and enriched_at is null`,
+              where id=$4 and (enriched_at is null or enriched_at < now() - interval '30 days')`,
             [hit.email, hit.status, hit.provider, agent.id]
           );
         }
@@ -436,11 +484,20 @@ async function enrichCycle() {
           status: "enriched", attempts: 0, email: hit.email, email_status: hit.status, provider: hit.provider,
           step_log: log, error: null, claimed_at: null,
         });
+      } else if (!hit && cache?.enriched_email && (!providersConfigured() || item.attempts + 1 >= MAX_ATTEMPTS)) {
+        // Re-enrichment isn't possible right now (no provider keys / providers erroring on the
+        // final attempt) but a stale cached email exists — reuse it rather than losing the lead.
+        await setItem(item, token, {
+          status: "enriched", attempts: 0, email: cache.enriched_email,
+          email_status: cache.enriched_email_status, provider: cache.enriched_provider,
+          step_log: log.concat([{ step: "stale_cache", ok: true, ms: 0, note: "re-enrichment unavailable — reused >30d cached email" }]),
+          error: null, claimed_at: null,
+        });
       } else if (providersConfigured() && cleanRun) {
         // every step ran cleanly and none found an email -> trustworthy not-found, cache it
         await pool.query(
           `update agents set enriched_email=null, enriched_email_status='not_found', enriched_provider=null, enriched_at=now()
-            where id=$1 and enriched_at is null`,
+            where id=$1 and (enriched_at is null or enriched_at < now() - interval '30 days')`,
           [agent.id]
         );
         await setItem(item, token, { status: "no_email", email_status: "not_found", step_log: log, error: null, claimed_at: null });
@@ -468,7 +525,7 @@ async function pushCycle() {
   if (items.length === 0) return false;
   const agents = await loadAgents(items.map((i) => i.agent_id));
   const { rows: batches } = await pool.query(
-    `select b.id, b.campaign_id, b.status,
+    `select b.id, b.campaign_id, b.status, b.source_priority,
             coalesce(oc.client_name, c.name, split_part(b.campaign_name, ' + ', 1)) as client_name
        from enrichment_batches b
        left join clients c on c.id = b.client_id
@@ -496,7 +553,7 @@ async function pushCycle() {
       continue;
     }
     try {
-      const payload = mapAgentToBisonLead(agent, item.email, agent.mls_code);
+      const payload = mapAgentToBisonLead(agent, item.email, agent.mls_code, orderFor(batch.source_priority));
       // Does this lead already exist in the workspace? (also our client-dedup source)
       const existing = await findBisonLeadByEmail(item.email);
       if (existing) {
