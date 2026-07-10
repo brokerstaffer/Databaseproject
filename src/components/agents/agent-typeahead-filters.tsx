@@ -406,7 +406,10 @@ export function MlsPopover({ value, onChange }: { value: IncludeExclude; onChang
           items.map((m) => (
             <label key={m.id} className="flex items-center gap-2 rounded px-1 py-1.5 text-sm text-neutral-800 hover:bg-neutral-50">
               <Checkbox checked={sel.includes(m.id)} onCheckedChange={() => toggle(m.id)} />
-              {m.name ?? m.code}
+              <span className="truncate">
+                {m.name ?? m.code}
+                {m.code && m.name && m.name !== m.code && <span className="text-neutral-400"> ({m.code})</span>}
+              </span>
             </label>
           ))
         )}
