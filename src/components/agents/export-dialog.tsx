@@ -18,6 +18,11 @@ interface ClientOpt {
   status: string | null;
   lead_count: number;
   bison_campaign_id: string | null;
+  has_portal: boolean;
+}
+interface PortalClientOpt {
+  name: string;
+  enabled: boolean;
 }
 interface Campaign {
   id: string;
@@ -46,8 +51,12 @@ export function ExportDialog({
   source: DataSource;
   mode?: SearchMode;
 }) {
-  const [method, setMethod] = useState<"campaign" | "csv">("campaign");
+  const [method, setMethod] = useState<"campaign" | "csv" | "portal">("campaign");
   const [sourcePriority, setSourcePriority] = useState<"courted" | "zillow" | "realtor">("courted");
+  const [portalTarget, setPortalTarget] = useState<"agents" | "dnc">("agents");
+  const [portalClients, setPortalClients] = useState<PortalClientOpt[]>([]);
+  const [portalClient, setPortalClient] = useState("");
+  const [portalErr, setPortalErr] = useState<string | null>(null);
   const [clients, setClients] = useState<ClientOpt[]>([]);
   const [clientId, setClientId] = useState("");
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
@@ -65,6 +74,22 @@ export function ExportDialog({
         .then((j) => setClients(j.clients ?? []));
     }
   }, [open]);
+
+  // Portal clients come from the portal's own admin directory (names only — tokens stay
+  // server-side); fetched lazily the first time the portal method is picked.
+  useEffect(() => {
+    if (open && method === "portal" && portalClients.length === 0) {
+      setPortalErr(null);
+      fetch("/api/portal/clients")
+        .then((r) => r.json())
+        .then((j) => {
+          if (j.error) setPortalErr(j.error);
+          else setPortalClients(j.clients ?? []);
+        })
+        .catch(() => setPortalErr("Could not reach the client portal"));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, method]);
 
   useEffect(() => {
     if (clientId) {
@@ -144,6 +169,33 @@ export function ExportDialog({
     }
   }
 
+  // Client portal: writes the agents into the client's portal — "Your Agents" roster or the
+  // DNC list. Both are idempotent on the portal side and also blocklist the emails on the
+  // sending tools so these people can never be cold-emailed for that client.
+  async function sendPortal() {
+    if (!portalClient) {
+      toast.error("Select a client");
+      return;
+    }
+    setBusy(true);
+    const res = await fetch("/api/portal/export", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...reqBody(), portalClient, target: portalTarget }),
+    });
+    setBusy(false);
+    const j = await res.json().catch(() => ({}));
+    if (res.ok) {
+      toast.success(
+        `Added ${j.inserted} agents to ${j.client}'s ${portalTarget === "agents" ? "Your Agents" : "DNC list"}${j.alreadyThere ? ` — ${j.alreadyThere} were already there` : ""}.`,
+        { duration: 8000 }
+      );
+      onOpenChange(false);
+    } else {
+      toast.error(j.error ?? "Portal send failed");
+    }
+  }
+
   async function downloadCsv() {
     if (cols.size === 0) {
       toast.error("Select at least one column");
@@ -185,8 +237,8 @@ export function ExportDialog({
           {/* method */}
           <div>
             <label className="text-sm font-medium text-neutral-700">Method</label>
-            <div className="mt-1.5 grid grid-cols-2 gap-2">
-              {([["campaign", "Send to campaign"], ["csv", "Download CSV"]] as const).map(([m, lbl]) => (
+            <div className="mt-1.5 grid grid-cols-3 gap-2">
+              {([["campaign", "Send to campaign"], ["csv", "Download CSV"], ["portal", "Client portal"]] as const).map(([m, lbl]) => (
                 <button
                   key={m}
                   type="button"
@@ -265,6 +317,53 @@ export function ExportDialog({
             </>
           )}
 
+          {/* portal options */}
+          {method === "portal" && (
+            <>
+              <div>
+                <label className="text-sm font-medium text-neutral-700">Client</label>
+                <Select value={portalClient} onValueChange={setPortalClient}>
+                  <SelectTrigger className="mt-1">
+                    <SelectValue placeholder={portalClients.length ? "Select a client" : "Loading portals…"} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {portalClients.map((c) => (
+                      <SelectItem key={c.name} value={c.name} disabled={!c.enabled}>
+                        {c.name}
+                        {!c.enabled && " (portal disabled)"}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {portalErr && <p className="mt-1 text-xs text-red-600">{portalErr}</p>}
+              </div>
+              <div>
+                <label className="text-sm font-medium text-neutral-700">Add to</label>
+                <div className="mt-1.5 grid grid-cols-2 gap-2">
+                  {([["agents", "Your Agents"], ["dnc", "DNC list"]] as const).map(([t, lbl]) => (
+                    <button
+                      key={t}
+                      type="button"
+                      onClick={() => setPortalTarget(t)}
+                      className={cn(
+                        "rounded-lg border px-3 py-2 text-sm font-medium transition-colors",
+                        portalTarget === t ? "border-neutral-900 bg-neutral-900 text-white" : "border-neutral-300 text-neutral-700 hover:bg-neutral-50"
+                      )}
+                    >
+                      {lbl}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <p className="text-xs text-neutral-500">
+                {portalTarget === "agents"
+                  ? "Adds the agents (name, email, phone, license) to the client's portal roster. Their emails are also blocklisted on the sending tools so the client's own agents are never cold-emailed."
+                  : "Adds the agents to the client's Do-Not-Contact list. Entries with an email are blocklisted on Instantly and EmailBison immediately."}
+                {" "}Re-sending the same agents is safe — the portal skips duplicates.
+              </p>
+            </>
+          )}
+
           {/* columns — CSV only; campaign sends build their own variables */}
           {method === "csv" && (
             <div>
@@ -306,7 +405,7 @@ export function ExportDialog({
           </div>
 
           <p className="text-xs text-neutral-500">
-            {method === "campaign" ? "Sending" : "Exporting"}: <span className="font-medium text-neutral-700">{scope}</span>
+            {method === "csv" ? "Exporting" : "Sending"}: <span className="font-medium text-neutral-700">{scope}</span>
             {method === "csv" ? ` · ${cols.size} columns` : ""}
           </p>
         </div>
@@ -317,6 +416,10 @@ export function ExportDialog({
           {method === "campaign" ? (
             <Button onClick={sendCampaign} disabled={busy || !clientId || !campaignId}>
               {busy ? "Queueing…" : "Send to campaign"}
+            </Button>
+          ) : method === "portal" ? (
+            <Button onClick={sendPortal} disabled={busy || !portalClient}>
+              {busy ? "Sending…" : portalTarget === "agents" ? "Add to Your Agents" : "Add to DNC list"}
             </Button>
           ) : (
             <Button onClick={downloadCsv} disabled={busy}>

@@ -21,6 +21,7 @@ export async function GET(req: NextRequest) {
     pool.query(
       `select c.id, c.client_name, c.status, c.mls, c.location, c.bison_campaign_id,
               c.leads_inreview, c.bison_leads_exported, c.created_at,
+              (c.portal_url is not null and c.portal_token is not null) as has_portal,
               count(l.agent_id)::int as lead_count
          from orch_clients c
          left join orch_client_leads l on l.client_id = c.id
