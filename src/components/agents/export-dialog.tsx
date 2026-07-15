@@ -83,9 +83,15 @@ export function ExportDialog({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, method]);
 
-  // Seed the export's client selection from the filter each time the dialog opens (editable after).
+  // Seed the export's client selection from the filter each time the dialog opens (editable
+  // after) — but NOT when the filter is excluding those clients (excluded clients are the ones
+  // the operator explicitly does NOT want to touch). Campaign picks start fresh per open.
   useEffect(() => {
-    if (open) setSelectedClientIds(new Set(filters.orchClientIds ?? []));
+    if (open) {
+      setSelectedClientIds(new Set(filters.orchClientMode === "exclude" ? [] : filters.orchClientIds ?? []));
+      setSelectedCampaigns(new Set());
+      knownCampaignIds.current = new Set();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
@@ -100,18 +106,28 @@ export function ExportDialog({
 
   // Load campaigns for the currently-selected clients (grouped per client). Keeps still-valid
   // campaign picks and pre-checks the default campaign of any newly-added client.
+  // Latest-wins: rapid client toggles fire overlapping fetches; only the newest response may
+  // apply, or a stale one can resurrect a deselected client's campaigns (and auto-check its
+  // default — leads would go to a campaign the operator deselected).
+  // Switching method away and back deliberately does NOT reset state — the operator's campaign
+  // picks (including deliberately UNchecked defaults) must survive a peek at the CSV tab.
+  const campaignsReqSeq = useRef(0);
   const clientKey = [...selectedClientIds].sort().join(",");
   useEffect(() => {
-    if (!open || method !== "campaign" || selectedClientIds.size === 0) {
+    if (!open || method !== "campaign") return;
+    const seq = ++campaignsReqSeq.current;
+    if (selectedClientIds.size === 0) {
       setCampaigns([]);
       setSelectedCampaigns(new Set());
       knownCampaignIds.current = new Set();
+      setLoadingCampaigns(false);
       return;
     }
     setLoadingCampaigns(true);
     fetch(`/api/bison/campaigns?orchClientIds=${encodeURIComponent(clientKey)}`)
       .then((r) => r.json())
       .then((j) => {
+        if (seq !== campaignsReqSeq.current) return; // stale response — a newer fetch owns the state
         const list: Campaign[] = j.campaigns ?? [];
         setCampaigns(list);
         setSelectedCampaigns((prev) => {
@@ -123,10 +139,13 @@ export function ExportDialog({
         knownCampaignIds.current = new Set(list.map((c) => c.id));
       })
       .catch(() => {
+        if (seq !== campaignsReqSeq.current) return;
         setCampaigns([]);
         setSelectedCampaigns(new Set());
       })
-      .finally(() => setLoadingCampaigns(false));
+      .finally(() => {
+        if (seq === campaignsReqSeq.current) setLoadingCampaigns(false);
+      });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, method, clientKey]);
 
@@ -176,12 +195,13 @@ export function ExportDialog({
     });
 
   // Group the selected clients' campaigns under each client for the grouped multi-select.
+  // Groups carry their client_id key — two clients can share a display name.
   const campaignGroups = Object.values(
     campaigns.reduce((acc, c) => {
       const key = c.client_id ?? c.client_name ?? "unknown";
-      (acc[key] ??= { clientName: c.client_name ?? "Client", items: [] as Campaign[] }).items.push(c);
+      (acc[key] ??= { key, clientName: c.client_name ?? "Client", items: [] as Campaign[] }).items.push(c);
       return acc;
-    }, {} as Record<string, { clientName: string; items: Campaign[] }>)
+    }, {} as Record<string, { key: string; clientName: string; items: Campaign[] }>)
   );
   const withCampaigns = new Set(campaigns.map((c) => c.client_id));
   const missingCount = [...selectedClientIds].filter((id) => !withCampaigns.has(id)).length;
@@ -363,7 +383,7 @@ export function ExportDialog({
                       <p className="py-4 text-center text-sm text-neutral-400">No campaigns synced for the selected client{selectedClientIds.size > 1 ? "s" : ""}.</p>
                     ) : (
                       campaignGroups.map((g) => (
-                        <div key={g.clientName}>
+                        <div key={g.key}>
                           <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-neutral-400">{g.clientName}</div>
                           <div className="space-y-1">
                             {g.items.map((c) => (

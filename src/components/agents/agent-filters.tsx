@@ -400,7 +400,6 @@ export function ClientPopover({
   }, [open]);
 
   const toggle = (id: string) => setSel((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
-  const allSel = !!clients && clients.length > 0 && clients.every((c) => sel.includes(c.id));
 
   return (
     <FilterPopoverShell
@@ -426,9 +425,15 @@ export function ClientPopover({
       </div>
       <div className="mb-1 flex items-center justify-between px-1 text-xs">
         <span className="text-neutral-400">{sel.length} out of {clients?.length ?? 0} selected</span>
-        <button type="button" className="text-neutral-600 hover:underline" onClick={() => setSel([])}>
-          Clear
-        </button>
+        <div className="flex gap-3">
+          {/* no-op while the list is loading — otherwise this would wipe the seeded selection */}
+          <button type="button" className="text-neutral-600 hover:underline" onClick={() => clients?.length && setSel(clients.map((c) => c.id))}>
+            Select all
+          </button>
+          <button type="button" className="text-neutral-600 hover:underline" onClick={() => setSel([])}>
+            Clear
+          </button>
+        </div>
       </div>
       <div className="max-h-64 space-y-1 overflow-auto">
         {clients === null ? (
@@ -437,14 +442,6 @@ export function ClientPopover({
           <p className="py-4 text-center text-sm text-neutral-400">No clients yet.</p>
         ) : (
           <>
-            <button
-              type="button"
-              onClick={() => setSel(allSel ? [] : clients.map((c) => c.id))}
-              className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm font-medium text-neutral-800 hover:bg-neutral-50"
-            >
-              <Checkbox checked={allSel} onCheckedChange={() => setSel(allSel ? [] : clients.map((c) => c.id))} onClick={(e) => e.stopPropagation()} aria-label="Select all clients" />
-              Select All
-            </button>
             {clients.map((c) => {
               const on = sel.includes(c.id);
               return (

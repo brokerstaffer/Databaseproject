@@ -53,53 +53,59 @@ function SearchInput({ placeholder, value, onChange }: { placeholder: string; va
   );
 }
 
-// "X out of Y selected" + Clear, shown above every CheckList.
-function CountRow({ selected, total, onClear }: { selected: number; total: number; onClear: () => void }) {
+// The options API caps lists at this many rows — when a list hits it, the true universe is
+// unknown, so counters and "Select all" must not pretend the shown slice is everything.
+const OPTIONS_CAP = 50;
+
+// "X out of Y selected" + [Select all · Clear], shown above every CheckList. When the list is
+// capped, the denominator is dropped (we only know what's shown, not the true total).
+function CountRow({ selected, total, capped = false, onSelectAll, onClear }: { selected: number; total: number; capped?: boolean; onSelectAll: () => void; onClear: () => void }) {
   return (
     <div className="mt-2 flex items-center justify-between px-1 text-xs">
-      <span className="text-neutral-400">{selected} out of {total} selected</span>
-      <button type="button" className="text-neutral-600 hover:underline" onClick={onClear}>
-        Clear
-      </button>
+      <span className="text-neutral-400">{capped ? `${selected} selected` : `${selected} out of ${total} selected`}</span>
+      <div className="flex gap-3">
+        <button type="button" className="text-neutral-600 hover:underline" onClick={onSelectAll}>
+          Select all
+        </button>
+        <button type="button" className="text-neutral-600 hover:underline" onClick={onClear}>
+          Clear
+        </button>
+      </div>
     </div>
   );
 }
 
-// Always-visible checkbox list with a "Select All" row at the top (selects/clears everything
-// currently shown). Options appear immediately when the filter opens.
+// Always-visible checkbox list ("Select all" lives in the CountRow header above, next to
+// Clear). Options appear immediately when the filter opens.
 function CheckList({
   options,
   isSelected,
   onToggle,
-  onSelectAll,
   emptyText = "No results.",
 }: {
   options: string[];
   isSelected: (o: string) => boolean;
   onToggle: (o: string) => void;
-  onSelectAll: (shown: string[], allSelected: boolean) => void;
   emptyText?: string;
 }) {
-  const allSel = options.length > 0 && options.every(isSelected);
   return (
-    <div className="mt-1 max-h-56 space-y-0.5 overflow-auto">
-      {options.length === 0 ? (
-        <div className="px-1 py-2 text-sm text-neutral-400">{emptyText}</div>
-      ) : (
-        <>
-          <label className="flex items-center gap-2 rounded px-1 py-1.5 text-sm font-medium text-neutral-800 hover:bg-neutral-50">
-            <Checkbox checked={allSel} onCheckedChange={() => onSelectAll(options, allSel)} />
-            Select All
-          </label>
-          {options.map((o) => (
+    <>
+      <div className="mt-1 max-h-56 space-y-0.5 overflow-auto">
+        {options.length === 0 ? (
+          <div className="px-1 py-2 text-sm text-neutral-400">{emptyText}</div>
+        ) : (
+          options.map((o) => (
             <label key={o} className="flex items-center gap-2 rounded px-1 py-1.5 text-sm text-neutral-800 hover:bg-neutral-50">
               <Checkbox checked={isSelected(o)} onCheckedChange={() => onToggle(o)} />
               <span className="truncate">{o}</span>
             </label>
-          ))}
-        </>
+          ))
+        )}
+      </div>
+      {options.length >= OPTIONS_CAP && (
+        <p className="mt-1 px-1 text-[11px] text-neutral-400">Showing the first {OPTIONS_CAP} matches — type to narrow.</p>
       )}
-    </div>
+    </>
   );
 }
 
@@ -217,9 +223,20 @@ export function LocationPopover({ value, onChange, officeMode = false }: { value
 
   const label = LOCATION_FIELDS.find((f) => f[0] === field)?.[1] ?? "City";
   const toggleKind = (k: LocationKind) => setKinds((a) => (a.includes(k) ? a.filter((x) => x !== k) : [...a, k]));
-  const toggleValue = (v: string) => setValues((vs) => (vs.includes(v) ? vs.filter((x) => x !== v) : [...vs, v]));
-  const selectAllValues = (shown: string[], allSel: boolean) =>
-    setValues((vs) => (allSel ? vs.filter((v) => !shown.includes(v)) : Array.from(new Set([...vs, ...shown]))));
+  // Hard 50-value cap — the same rule the All-filters drawer enforces on this filter; the two
+  // surfaces must agree or one creates a state the other refuses to edit.
+  const LOCATION_CAP = 50;
+  const toggleValue = (v: string) =>
+    setValues((vs) => (vs.includes(v) ? vs.filter((x) => x !== v) : vs.length >= LOCATION_CAP ? vs : [...vs, v]));
+  const selectAllShown = () =>
+    setValues((vs) => {
+      const merged = [...vs];
+      for (const o of options) {
+        if (merged.length >= LOCATION_CAP) break;
+        if (!merged.includes(o)) merged.push(o);
+      }
+      return merged;
+    });
 
   return (
     <FilterPopoverShell
@@ -263,9 +280,12 @@ export function LocationPopover({ value, onChange, officeMode = false }: { value
           <SearchInput placeholder={`Search by ${label.toLowerCase()}`} value={query} onChange={setQuery} />
         </div>
       </div>
-      <CountRow selected={values.length} total={Math.max(total, values.length)} onClear={() => setValues([])} />
-      <CheckList options={options} isSelected={(o) => values.includes(o)} onToggle={toggleValue} onSelectAll={selectAllValues} />
+      <CountRow selected={values.length} total={Math.max(total, values.length)} capped={total >= OPTIONS_CAP} onSelectAll={selectAllShown} onClear={() => setValues([])} />
+      <CheckList options={options} isSelected={(o) => values.includes(o)} onToggle={toggleValue} />
       <Chips items={values} onRemove={(v) => setValues(values.filter((x) => x !== v))} />
+      {values.length >= LOCATION_CAP && (
+        <p className="mt-1 px-1 text-[11px] text-amber-600">{LOCATION_CAP} locations max — remove some to add more.</p>
+      )}
       {/* Office mode always filters on the OFFICE's location — the kind checkboxes only apply
           to agent searches, so they're hidden there instead of silently ignored. */}
       {!officeMode && (
@@ -305,6 +325,7 @@ export function OfficeSearchPopover({ value, onChange }: { value: OfficeSearchFi
 
   const count = value.brand.include.length + value.brand.exclude.length + value.office.include.length + value.office.exclude.length;
   const cur = entity === "brand" ? (mode === "include" ? bInc : bExc) : (mode === "include" ? oInc : oExc);
+  const other = entity === "brand" ? (mode === "include" ? bExc : bInc) : (mode === "include" ? oExc : oInc);
   const setCur = entity === "brand" ? (mode === "include" ? setBInc : setBExc) : (mode === "include" ? setOInc : setOExc);
   const setOther = entity === "brand" ? (mode === "include" ? setBExc : setBInc) : (mode === "include" ? setOExc : setOInc);
   const totalSelected = bInc.length + bExc.length + oInc.length + oExc.length;
@@ -312,25 +333,9 @@ export function OfficeSearchPopover({ value, onChange }: { value: OfficeSearchFi
     if (cur.includes(o)) setCur((a) => a.filter((x) => x !== o));
     else { setCur((a) => [...a, o]); setOther((a) => a.filter((x) => x !== o)); }
   };
-  const selectAll = (shown: string[], allSel: boolean) => {
-    if (allSel) setCur((a) => a.filter((o) => !shown.includes(o)));
-    else { setCur((a) => Array.from(new Set([...a, ...shown]))); setOther((a) => a.filter((o) => !shown.includes(o))); }
-  };
-
-  // Flipping the Include/Exclude toggle re-buckets the CURRENT entity's existing chips, so
-  // "pick as Include → switch to Exclude → Apply" actually moves them. Previously the toggle
-  // only steered the next pick, so an existing chip stayed put and Apply was a no-op.
-  const switchMode = (m: "include" | "exclude") => {
-    setMode(m);
-    const uniq = (a: string[], b: string[]) => Array.from(new Set([...a, ...b]));
-    if (entity === "brand") {
-      if (m === "exclude") { setBExc((x) => uniq(x, bInc)); setBInc([]); }
-      else { setBInc((x) => uniq(x, bExc)); setBExc([]); }
-    } else {
-      if (m === "exclude") { setOExc((x) => uniq(x, oInc)); setOInc([]); }
-      else { setOInc((x) => uniq(x, oExc)); setOExc([]); }
-    }
-  };
+  // Bulk select only ADDS options that aren't in either bucket — it must never silently move
+  // a chip out of the opposite bucket (a single explicit click via toggleOne may).
+  const selectAll = () => setCur((a) => Array.from(new Set([...a, ...options.filter((o) => !other.includes(o))])));
 
   return (
     <FilterPopoverShell
@@ -367,14 +372,17 @@ export function OfficeSearchPopover({ value, onChange }: { value: OfficeSearchFi
             <SelectItem value="office">Office</SelectItem>
           </SelectContent>
         </Select>
-        <RadioOpt label="Include" on={mode === "include"} onClick={() => switchMode("include")} />
-        <RadioOpt label="Exclude" on={mode === "exclude"} onClick={() => switchMode("exclude")} />
+        {/* Mode-only radios: they steer which bucket NEW picks land in. Existing chips keep
+            their bucket (remove them individually or Clear) — flipping the radio must never
+            silently move chips, that inverts the applied filter (the Loom bug). */}
+        <RadioOpt label="Include" on={mode === "include"} onClick={() => setMode("include")} />
+        <RadioOpt label="Exclude" on={mode === "exclude"} onClick={() => setMode("exclude")} />
       </div>
       <div className="mt-2">
         <SearchInput placeholder={`Search ${entity}`} value={query} onChange={setQuery} />
       </div>
-      <CountRow selected={totalSelected} total={Math.max(total, totalSelected)} onClear={() => { setBInc([]); setBExc([]); setOInc([]); setOExc([]); }} />
-      <CheckList options={options} isSelected={(o) => cur.includes(o)} onToggle={toggleOne} onSelectAll={selectAll} />
+      <CountRow selected={totalSelected} total={Math.max(total, totalSelected)} capped={total >= OPTIONS_CAP} onSelectAll={selectAll} onClear={() => { setBInc([]); setBExc([]); setOInc([]); setOExc([]); }} />
+      <CheckList options={options} isSelected={(o) => cur.includes(o)} onToggle={toggleOne} />
       {(bInc.length > 0 || bExc.length > 0) && (
         <div className="mt-3">
           <div className="text-xs font-medium text-neutral-500">Brand</div>
@@ -482,11 +490,13 @@ export function MlsPopover({ value, onChange }: { value: IncludeExclude; onChang
           className="h-10 w-full rounded-lg border border-neutral-300 pl-9 pr-3 text-sm placeholder:text-neutral-400 focus:border-neutral-400 focus:outline-none"
         />
       </div>
+      {/* The mls options list is NOT capped (unlike the typeaheads) — the full MLS table is
+          always shown, so the denominator is always honest here. */}
       <div className="mt-2 flex items-center justify-between px-1 text-xs">
         <span className="text-neutral-400">{sel.length} out of {Math.max(total, sel.length)} selected</span>
         <div className="flex gap-3">
           <button type="button" className="text-neutral-600 hover:underline" onClick={() => setSel((s) => Array.from(new Set([...s, ...items.map((m) => m.id)])))}>
-            Select all shown
+            Select all
           </button>
           <button type="button" className="text-neutral-600 hover:underline" onClick={() => setSel([])}>
             Clear
@@ -535,23 +545,15 @@ export function LicensePopover({ value, onChange }: { value: IncludeExclude; onC
 
   const count = value.include.length + value.exclude.length;
   const cur = mode === "include" ? inc : exc;
+  const other = mode === "include" ? exc : inc;
   const setCur = mode === "include" ? setInc : setExc;
   const setOther = mode === "include" ? setExc : setInc;
   const toggleOne = (o: string) => {
     if (cur.includes(o)) setCur((a) => a.filter((x) => x !== o));
     else { setCur((a) => [...a, o]); setOther((a) => a.filter((x) => x !== o)); }
   };
-  const selectAll = (shown: string[], allSel: boolean) => {
-    if (allSel) setCur((a) => a.filter((o) => !shown.includes(o)));
-    else { setCur((a) => Array.from(new Set([...a, ...shown]))); setOther((a) => a.filter((o) => !shown.includes(o))); }
-  };
-  // Flipping the toggle re-buckets the existing chips (see OfficeSearchPopover.switchMode).
-  const switchMode = (m: "include" | "exclude") => {
-    setMode(m);
-    const uniq = (a: string[], b: string[]) => Array.from(new Set([...a, ...b]));
-    if (m === "exclude") { setExc((x) => uniq(x, inc)); setInc([]); }
-    else { setInc((x) => uniq(x, exc)); setExc([]); }
-  };
+  // Bulk select only ADDS options not in either bucket — never silently moves a chip.
+  const selectAll = () => setCur((a) => Array.from(new Set([...a, ...options.filter((o) => !other.includes(o))])));
 
   return (
     <FilterPopoverShell
@@ -571,15 +573,15 @@ export function LicensePopover({ value, onChange }: { value: IncludeExclude; onC
       }}
     >
       <div className="flex items-center gap-6">
-        {/* Flipping the toggle moves existing chips to that bucket (and steers new picks). */}
-        <RadioOpt label="Include" on={mode === "include"} onClick={() => switchMode("include")} />
-        <RadioOpt label="Exclude" on={mode === "exclude"} onClick={() => switchMode("exclude")} />
+        {/* Mode-only radios: steer NEW picks; existing chips keep their bucket (Loom bug). */}
+        <RadioOpt label="Include" on={mode === "include"} onClick={() => setMode("include")} />
+        <RadioOpt label="Exclude" on={mode === "exclude"} onClick={() => setMode("exclude")} />
       </div>
       <div className="mt-2">
         <SearchInput placeholder="Search license #" value={query} onChange={setQuery} />
       </div>
-      <CountRow selected={inc.length + exc.length} total={Math.max(total, inc.length + exc.length)} onClear={() => { setInc([]); setExc([]); }} />
-      <CheckList options={options} isSelected={(o) => cur.includes(o)} onToggle={toggleOne} onSelectAll={selectAll} />
+      <CountRow selected={inc.length + exc.length} total={Math.max(total, inc.length + exc.length)} capped={total >= OPTIONS_CAP} onSelectAll={selectAll} onClear={() => { setInc([]); setExc([]); }} />
+      <CheckList options={options} isSelected={(o) => cur.includes(o)} onToggle={toggleOne} />
       <Chips items={inc} onRemove={(v) => setInc(inc.filter((x) => x !== v))} />
       <Chips items={exc} tone="exclude" onRemove={(v) => setExc(exc.filter((x) => x !== v))} />
     </FilterPopoverShell>
@@ -604,23 +606,15 @@ export function NamePopover({ value, onChange }: { value: IncludeExclude; onChan
 
   const count = value.include.length + value.exclude.length;
   const cur = mode === "include" ? inc : exc;
+  const other = mode === "include" ? exc : inc;
   const setCur = mode === "include" ? setInc : setExc;
   const setOther = mode === "include" ? setExc : setInc;
   const toggleOne = (o: string) => {
     if (cur.includes(o)) setCur((a) => a.filter((x) => x !== o));
     else { setCur((a) => [...a, o]); setOther((a) => a.filter((x) => x !== o)); }
   };
-  const selectAll = (shown: string[], allSel: boolean) => {
-    if (allSel) setCur((a) => a.filter((o) => !shown.includes(o)));
-    else { setCur((a) => Array.from(new Set([...a, ...shown]))); setOther((a) => a.filter((o) => !shown.includes(o))); }
-  };
-  // Flipping the toggle re-buckets the existing chips (see OfficeSearchPopover.switchMode).
-  const switchMode = (m: "include" | "exclude") => {
-    setMode(m);
-    const uniq = (a: string[], b: string[]) => Array.from(new Set([...a, ...b]));
-    if (m === "exclude") { setExc((x) => uniq(x, inc)); setInc([]); }
-    else { setInc((x) => uniq(x, exc)); setExc([]); }
-  };
+  // Bulk select only ADDS options not in either bucket — never silently moves a chip.
+  const selectAll = () => setCur((a) => Array.from(new Set([...a, ...options.filter((o) => !other.includes(o))])));
 
   return (
     <FilterPopoverShell
@@ -640,15 +634,15 @@ export function NamePopover({ value, onChange }: { value: IncludeExclude; onChan
       }}
     >
       <div className="flex items-center gap-6">
-        {/* Flipping the toggle moves existing chips to that bucket (and steers new picks). */}
-        <RadioOpt label="Include" on={mode === "include"} onClick={() => switchMode("include")} />
-        <RadioOpt label="Exclude" on={mode === "exclude"} onClick={() => switchMode("exclude")} />
+        {/* Mode-only radios: steer NEW picks; existing chips keep their bucket (Loom bug). */}
+        <RadioOpt label="Include" on={mode === "include"} onClick={() => setMode("include")} />
+        <RadioOpt label="Exclude" on={mode === "exclude"} onClick={() => setMode("exclude")} />
       </div>
       <div className="mt-2">
         <SearchInput placeholder="Search by name" value={query} onChange={setQuery} />
       </div>
-      <CountRow selected={inc.length + exc.length} total={Math.max(total, inc.length + exc.length)} onClear={() => { setInc([]); setExc([]); }} />
-      <CheckList options={options} isSelected={(o) => cur.includes(o)} onToggle={toggleOne} onSelectAll={selectAll} />
+      <CountRow selected={inc.length + exc.length} total={Math.max(total, inc.length + exc.length)} capped={total >= OPTIONS_CAP} onSelectAll={selectAll} onClear={() => { setInc([]); setExc([]); }} />
+      <CheckList options={options} isSelected={(o) => cur.includes(o)} onToggle={toggleOne} />
       <Chips items={inc} onRemove={(v) => setInc(inc.filter((x) => x !== v))} />
       <Chips items={exc} tone="exclude" onRemove={(v) => setExc(exc.filter((x) => x !== v))} />
     </FilterPopoverShell>

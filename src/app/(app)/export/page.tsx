@@ -54,7 +54,9 @@ function summarizeFilters(bf: BatchFilters | null): string {
   const parts: string[] = [];
   const f = (bf.filters ?? {}) as Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
   if ((bf.selectedCount ?? 0) > 0) parts.push(`${bf.selectedCount} hand-picked`);
-  if (f.orchClientId) parts.push("Client filter");
+  // Client filter: new multi-select shape (orchClientIds) or the legacy scalar (old batches).
+  const clientIdCount = Array.isArray(f.orchClientIds) ? f.orchClientIds.length : f.orchClientId ? 1 : 0;
+  if (clientIdCount > 0) parts.push(`Client filter (${f.orchClientMode === "exclude" ? "exclude " : ""}${clientIdCount})`);
   if (f.location?.values?.length) {
     const v = f.location.values;
     parts.push(`${f.location.field ?? "city"}: ${v.slice(0, 2).join(", ")}${v.length > 2 ? ` +${v.length - 2}` : ""}`);

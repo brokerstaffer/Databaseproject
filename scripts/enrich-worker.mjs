@@ -167,15 +167,18 @@ async function campaignNameById(id) {
   return name;
 }
 
-// Per-campaign, per-client dedup. For a target campaign, return the name of a DIFFERENT
-// (non-targeted) campaign of that SAME campaign's client the lead is already in — meaning we
-// should skip attaching to the target (don't double-contact within a client). Campaigns the
-// batch is deliberately targeting (chosenIds) never block. Returns null = ok to attach.
-async function leadBlockedForCampaign(lead, targetCampaignId, chosenIds) {
+// Per-campaign, per-client dedup. For a target campaign, return the name of ANY campaign of
+// that SAME campaign's client the lead is already in (including the target itself) — meaning
+// skip the target: the client has already contacted (or is contacting) this lead, and
+// attaching again risks double-contact or restarting a finished sequence. Pre-existing
+// membership blocks even when the existing campaign is also targeted by this batch — the
+// dedup decision is made ONCE against pre-batch state and persisted (target_campaign_ids),
+// so a retry never mistakes this batch's own attaches for prior membership.
+// Returns null = ok to attach.
+async function leadBlockedForCampaign(lead, targetCampaignId) {
   const targetClient = clientPrefix(await campaignNameById(targetCampaignId));
   if (!targetClient) return null;
   for (const c of lead?.lead_campaign_data ?? []) {
-    if (chosenIds.has(String(c.campaign_id))) continue; // a campaign we're deliberately targeting
     const name = await campaignNameById(c.campaign_id);
     if (name && clientPrefix(name) === targetClient) return name;
   }
@@ -395,7 +398,10 @@ async function refreshActiveBatches() {
       where b.id = s.batch_id and b.status in ('queued','running')`
   );
   // Orchestrator handshake: once a batch has actually delivered leads into a campaign,
-  // flag that campaign as populated (bison_campaigns.leads_imported_campaign).
+  // flag that campaign as populated (bison_campaigns.leads_imported_campaign). Only campaigns
+  // that RECEIVED a sent lead are flagged — a multi-campaign batch where every lead deduped
+  // out of one campaign must not mark that campaign populated. Sent items record their real
+  // targets in target_campaign_ids (legacy items predate the column: fall back to campaign_id).
   await pool.query(
     `update bison_campaigns bc
         set leads_imported_campaign = true
@@ -403,7 +409,10 @@ async function refreshActiveBatches() {
       where b.status = 'done'
         and b.sent > 0
         and b.campaign_id is not null
-        and coalesce(bc.raw->>'id', bc.bison_campaign_id) = any(coalesce(b.campaign_ids, array[b.campaign_id]))
+        and coalesce(bc.raw->>'id', bc.bison_campaign_id) in (
+          select unnest(coalesce(i.target_campaign_ids, array[b.campaign_id]))
+            from enrichment_items i
+           where i.batch_id = b.id and i.status = 'sent')
         and bc.leads_imported_campaign is distinct from true`
   );
 }
@@ -563,20 +572,29 @@ async function pushCycle() {
       // Does this lead already exist in the workspace? (also our per-client dedup source)
       const existing = await findBisonLeadByEmail(item.email);
 
-      // Per target campaign: attach, unless the lead is already in a non-targeted campaign of
-      // that campaign's own client (per-campaign, per-client dedup).
-      const attachTo = [];
+      // Per target campaign: attach, unless the lead is already in a campaign of that
+      // campaign's own client (per-campaign, per-client dedup). The decision is computed ONCE
+      // against pre-batch memberships and persisted in target_campaign_ids — a retry reuses it,
+      // so this batch's own partial attaches never block the remaining targets and the
+      // client_dedup step notes aren't appended a second time.
+      let attachTo;
       const skipNotes = [];
-      for (const cid of chosen) {
-        const blockedBy = existing ? await leadBlockedForCampaign(existing, cid, chosenSet) : null;
-        if (blockedBy) skipNotes.push({ step: "client_dedup", ok: true, ms: 0, note: `skip campaign ${cid}: already in "${blockedBy}"` });
-        else attachTo.push(cid);
+      if (item.target_campaign_ids != null) {
+        attachTo = item.target_campaign_ids.map(String).filter((cid) => chosenSet.has(cid));
+      } else {
+        attachTo = [];
+        for (const cid of chosen) {
+          const blockedBy = existing ? await leadBlockedForCampaign(existing, cid) : null;
+          if (blockedBy) skipNotes.push({ step: "client_dedup", ok: true, ms: 0, note: `skip campaign ${cid}: already in "${blockedBy}"` });
+          else attachTo.push(cid);
+        }
       }
 
       if (attachTo.length === 0) {
         // every target campaign deduped -> terminal skip (no lead create/refresh needed)
         await setItem(item, token, {
           status: "skipped", bison_lead_id: existing ? String(existing.id) : (item.bison_lead_id ?? null),
+          target_campaign_ids: attachTo,
           error: null, claimed_at: null,
           step_log: (item.step_log ?? []).concat(skipNotes),
         });
@@ -590,8 +608,9 @@ async function pushCycle() {
       } else if (!leadId) {
         leadId = await upsertBisonLead(payload);
       }
-      await setItem(item, token, { bison_lead_id: leadId, step_log: (item.step_log ?? []).concat(skipNotes) }); // persist BEFORE attach
+      await setItem(item, token, { bison_lead_id: leadId, target_campaign_ids: attachTo, step_log: (item.step_log ?? []).concat(skipNotes) }); // persist BEFORE attach
       item.bison_lead_id = leadId;
+      item.target_campaign_ids = attachTo;
       for (const cid of attachTo) {
         if (!toAttach.has(cid)) toAttach.set(cid, []);
         toAttach.get(cid).push({ item, leadId });
