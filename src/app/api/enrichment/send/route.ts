@@ -24,6 +24,22 @@ export async function POST(req: NextRequest) {
   // which source's values win for the merged lead fields (courted | zillow | realtor)
   const sourcePriority = ["courted", "zillow", "realtor"].includes(body?.sourcePriority) ? body.sourcePriority : "courted";
 
+  // Target campaigns: the new multi-select sends campaigns: [{ id, name, clientId }] (may span
+  // several clients). Fall back to the legacy single campaignId/campaignName. campaign_id stays
+  // = the first campaign so the worker's push-stage + progress guards keep working.
+  const campaignList: { id: string; name: string | null }[] = (Array.isArray(body?.campaigns) ? body.campaigns : [])
+    .map((c: { id?: unknown; name?: unknown }) => ({ id: c?.id != null ? String(c.id) : "", name: (c?.name as string) ?? null }))
+    .filter((c: { id: string }) => c.id);
+  if (campaignList.length === 0 && campaignId) campaignList.push({ id: String(campaignId), name: campaignName ?? null });
+  const campaignIds = campaignList.map((c) => c.id);
+  const campaignNamesJoined = campaignList.map((c) => c.name).filter(Boolean).join(", ") || null;
+  const firstCampaignId = campaignIds[0] ?? null;
+
+  const orchClientIds: string[] = Array.isArray(body?.orchClientIds) ? body.orchClientIds.filter(Boolean) : [];
+  const f = filters as Record<string, unknown>;
+  const filterClientIds = Array.isArray(f?.orchClientIds) ? (f.orchClientIds as string[]) : [];
+  const orchClientIdForBatch = orchClientId || orchClientIds[0] || filterClientIds[0] || f?.orchClientId || null;
+
   let rows: Record<string, unknown>[] = [];
   try {
     rows = await gatherExportRows({ mode, source, filters, selectedIds, rangeFrom, rangeTo });
@@ -39,13 +55,14 @@ export async function POST(req: NextRequest) {
   try {
     await dbc.query("begin");
     const batch = await dbc.query(
-      `insert into enrichment_batches (client_id, orch_client_id, campaign_id, campaign_name, total, created_by, filters, source_priority)
-       values ($1, $2, $3, $4, $5, $6, $7::jsonb, $8) returning id`,
+      `insert into enrichment_batches (client_id, orch_client_id, campaign_id, campaign_ids, campaign_name, total, created_by, filters, source_priority)
+       values ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9) returning id`,
       [
         clientId,
-        orchClientId || (filters as Record<string, unknown>)?.orchClientId || null,
-        campaignId,
-        campaignName,
+        orchClientIdForBatch,
+        firstCampaignId,
+        campaignIds.length ? campaignIds : null,
+        campaignNamesJoined,
         agentIds.length,
         user.id,
         JSON.stringify({ filters, mode, source, selectedCount: Array.isArray(selectedIds) ? selectedIds.length : 0, rangeFrom: rangeFrom ?? null, rangeTo: rangeTo ?? null }),
@@ -70,8 +87,8 @@ export async function POST(req: NextRequest) {
   await logAudit({
     action: "enrichment_send",
     performedBy: user.email ?? null,
-    details: `Queued ${agentIds.length} agents for enrichment${campaignName ? ` -> EmailBison campaign "${campaignName}"` : " (enrich only)"}`,
-    meta: { kind: "enrichment_send", batchId, clientId, campaignId, campaignName, source },
+    details: `Queued ${agentIds.length} agents for enrichment${campaignNamesJoined ? ` -> ${campaignIds.length} EmailBison campaign${campaignIds.length > 1 ? "s" : ""} (${campaignNamesJoined})` : " (enrich only)"}`,
+    meta: { kind: "enrichment_send", batchId, clientId, orchClientId: orchClientIdForBatch, campaignId: firstCampaignId, campaignIds, campaignName: campaignNamesJoined, source },
   });
   return NextResponse.json({ ok: true, batchId, queued: agentIds.length });
 }

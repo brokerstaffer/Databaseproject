@@ -65,7 +65,7 @@ export function TopBar({ initials, email }: { initials: string; email: string })
 
   return (
     <header className="flex h-14 shrink-0 items-center gap-3 bg-neutral-950 px-3 text-white">
-      <Link href="/search" className="flex h-9 w-9 items-center justify-center rounded-md bg-neutral-800 text-white" title="Broker Staffer">
+      <Link href="/search" className="flex h-9 w-9 items-center justify-center rounded-md bg-neutral-800 text-white" title="BrokerStaffer">
         <Building2 className="h-5 w-5" />
       </Link>
       <form

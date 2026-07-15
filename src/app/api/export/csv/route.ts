@@ -44,7 +44,7 @@ export async function POST(req: NextRequest) {
   return new NextResponse(csv, {
     headers: {
       "Content-Type": "text/csv; charset=utf-8",
-      "Content-Disposition": `attachment; filename="broker-staffer-agents.csv"`,
+      "Content-Disposition": `attachment; filename="brokerstaffer-agents.csv"`,
     },
   });
 }

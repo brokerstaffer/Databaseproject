@@ -57,8 +57,8 @@ export interface Filters {
   license: IncludeExclude; // license numbers
   name: IncludeExclude; // full names (include/exclude)
   nameQuery: string; // free-text name search (top search bar)
-  orchClientId: string; // orchestrator client (orch_clients.id) — "" = off
-  orchClientMode: "include" | "exclude"; // include that client's leads, or exclude them
+  orchClientIds: string[]; // orchestrator clients (orch_clients.id) — [] = off; multi-select
+  orchClientMode: "include" | "exclude"; // include those clients' leads, or exclude them
   missingContact: { email: boolean; phone: boolean }; // agents MISSING the checked contact info
   agentCount: RangeF; // office mode: number of agents in the office
   zillowRealtor: ZillowRealtorFilter;
@@ -80,7 +80,7 @@ export const DEFAULT_FILTERS: Filters = {
   license: { include: [], exclude: [] },
   name: { include: [], exclude: [] },
   nameQuery: "",
-  orchClientId: "",
+  orchClientIds: [],
   orchClientMode: "include",
   missingContact: { email: false, phone: false },
   agentCount: { buckets: [], min: "", max: "" },
@@ -132,6 +132,18 @@ export const zillowRealtorCount = (z: ZillowRealtorFilter) =>
   z.languages.length + mmCount(z.totalSales) + mmCount(z.avgPriceAllTime) + mmCount(z.avgVolumeAllTime) + (z.hasLinkedin ? 1 : 0);
 export const missingContactCount = (m: { email: boolean; phone: boolean }) => (m.email ? 1 : 0) + (m.phone ? 1 : 0);
 
+// Merge a partial/legacy filters object onto the defaults. Older saved views stored a single
+// `orchClientId` (string) before the Client filter became multi-select — fold it into the
+// `orchClientIds` array so those views still apply their client. Newer keys fall back to defaults.
+export function normalizeFilters(f: Partial<Filters> & { orchClientId?: string }): Filters {
+  const merged: Filters = { ...DEFAULT_FILTERS, ...(f as Filters) };
+  if ((!merged.orchClientIds || merged.orchClientIds.length === 0) && typeof f.orchClientId === "string" && f.orchClientId) {
+    merged.orchClientIds = [f.orchClientId];
+  }
+  delete (merged as Partial<Filters> & { orchClientId?: string }).orchClientId;
+  return merged;
+}
+
 // Total count of every ACTIVE agent-search filter — drives the "All filters (N)" badge and
 // the Clear-all button visibility. (nameQuery is a find/highlight tool, not counted.)
 // Mode-aware: the badge counts ONLY the filters the current mode's query actually applies.
@@ -143,7 +155,7 @@ export function activeFilterCount(f: Filters, mode: "agent" | "office" = "agent"
     rangeCount(f.salesVolume) +
     officeSearchCount(f.officeSearch) +
     rangeCount(f.closedUnits) +
-    (f.orchClientId ? 1 : 0);
+    (f.orchClientIds.length ? 1 : 0);
   if (mode === "office") return shared + rangeCount(f.agentCount);
   return (
     shared +

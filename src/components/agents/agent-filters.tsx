@@ -375,12 +375,12 @@ export function ClientPopover({
   clientMode,
   onChange,
 }: {
-  value: string;
+  value: string[];
   clientMode: "include" | "exclude";
-  onChange: (id: string, mode: "include" | "exclude") => void;
+  onChange: (ids: string[], mode: "include" | "exclude") => void;
 }) {
   const [open, setOpen] = useState(false);
-  const [sel, setSel] = useState(value);
+  const [sel, setSel] = useState<string[]>(value);
   const [mode, setMode] = useState<"include" | "exclude">(clientMode);
   const [clients, setClients] = useState<OrchClient[] | null>(null);
 
@@ -399,15 +399,18 @@ export function ClientPopover({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
+  const toggle = (id: string) => setSel((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
+  const allSel = !!clients && clients.length > 0 && clients.every((c) => sel.includes(c.id));
+
   return (
     <FilterPopoverShell
       label="Client"
-      count={value ? 1 : 0}
+      count={value.length}
       open={open}
       onOpenChange={setOpen}
       width="w-80"
       onClear={() => {
-        setSel("");
+        setSel([]);
         setMode("include");
       }}
       onApply={() => {
@@ -415,11 +418,17 @@ export function ClientPopover({
         setOpen(false);
       }}
     >
-      {/* Include = only this client's leads; Exclude = everyone but them (skip agents already
-          built for that client). */}
-      <div className="mb-3 flex items-center gap-6">
+      {/* Include = only these clients' leads; Exclude = everyone but them (skip agents already
+          built for any selected client). Multiple clients are unioned. */}
+      <div className="mb-2 flex items-center gap-6">
         <Radio label="Include" on={mode === "include"} onClick={() => setMode("include")} />
         <Radio label="Exclude" on={mode === "exclude"} onClick={() => setMode("exclude")} />
+      </div>
+      <div className="mb-1 flex items-center justify-between px-1 text-xs">
+        <span className="text-neutral-400">{sel.length} out of {clients?.length ?? 0} selected</span>
+        <button type="button" className="text-neutral-600 hover:underline" onClick={() => setSel([])}>
+          Clear
+        </button>
       </div>
       <div className="max-h-64 space-y-1 overflow-auto">
         {clients === null ? (
@@ -427,26 +436,34 @@ export function ClientPopover({
         ) : clients.length === 0 ? (
           <p className="py-4 text-center text-sm text-neutral-400">No clients yet.</p>
         ) : (
-          clients.map((c) => {
-            const on = sel === c.id;
-            return (
-              <button
-                key={c.id}
-                type="button"
-                onClick={() => setSel(on ? "" : c.id)}
-                className={cn(
-                  "flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm",
-                  on ? "bg-neutral-100 text-neutral-900" : "text-neutral-800 hover:bg-neutral-50"
-                )}
-              >
-                <span className={cn("flex h-4 w-4 shrink-0 items-center justify-center rounded-full border", on ? "border-neutral-900" : "border-neutral-300")}>
-                  {on && <span className="h-2 w-2 rounded-full bg-neutral-900" />}
-                </span>
-                <span className="min-w-0 flex-1 truncate">{c.client_name ?? "Unnamed client"}</span>
-                <span className="shrink-0 text-xs text-neutral-400">{c.lead_count.toLocaleString()} leads</span>
-              </button>
-            );
-          })
+          <>
+            <button
+              type="button"
+              onClick={() => setSel(allSel ? [] : clients.map((c) => c.id))}
+              className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm font-medium text-neutral-800 hover:bg-neutral-50"
+            >
+              <Checkbox checked={allSel} onCheckedChange={() => setSel(allSel ? [] : clients.map((c) => c.id))} onClick={(e) => e.stopPropagation()} aria-label="Select all clients" />
+              Select All
+            </button>
+            {clients.map((c) => {
+              const on = sel.includes(c.id);
+              return (
+                <button
+                  key={c.id}
+                  type="button"
+                  onClick={() => toggle(c.id)}
+                  className={cn(
+                    "flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm",
+                    on ? "bg-neutral-100 text-neutral-900" : "text-neutral-800 hover:bg-neutral-50"
+                  )}
+                >
+                  <Checkbox checked={on} onCheckedChange={() => toggle(c.id)} onClick={(e) => e.stopPropagation()} aria-label={c.client_name ?? "Unnamed client"} />
+                  <span className="min-w-0 flex-1 truncate">{c.client_name ?? "Unnamed client"}</span>
+                  <span className="shrink-0 text-xs text-neutral-400">{c.lead_count.toLocaleString()} leads</span>
+                </button>
+              );
+            })}
+          </>
         )}
       </div>
     </FilterPopoverShell>

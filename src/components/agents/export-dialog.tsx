@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -12,24 +12,19 @@ import type { Filters } from "@/types/agent-filters";
 import type { DataSource, SearchMode } from "@/types/agent";
 import { EXPORT_COLUMNS } from "@/lib/export/columns";
 
-interface ClientOpt {
-  id: string;
-  client_name: string | null;
-  status: string | null;
-  lead_count: number;
-  bison_campaign_id: string | null;
-  has_portal: boolean;
-}
 interface PortalClientOpt {
   name: string;
   enabled: boolean;
 }
 interface Campaign {
-  id: string;
+  id: string; // bison_campaigns.id (internal UUID key — unique per campaign)
   bison_campaign_id: string;
-  bison_id: string; // EmailBison's numeric campaign id
+  bison_id: string; // EmailBison's numeric campaign id (the id the send expects)
   name: string | null;
   status: string | null;
+  client_id: string | null; // which selected client this campaign belongs to
+  client_name: string | null;
+  is_default: boolean; // the client's designated campaign (orch_clients.bison_campaign_id)
 }
 
 const ALL_KEYS = EXPORT_COLUMNS.map((c) => c.key);
@@ -57,23 +52,20 @@ export function ExportDialog({
   const [portalClients, setPortalClients] = useState<PortalClientOpt[]>([]);
   const [portalClient, setPortalClient] = useState("");
   const [portalErr, setPortalErr] = useState<string | null>(null);
-  const [clients, setClients] = useState<ClientOpt[]>([]);
-  const [clientId, setClientId] = useState("");
+  // Campaign method has its OWN multi-select client picker showing ALL clients (independent of
+  // the main filter). It's pre-seeded from the clients chosen in the filter but fully editable.
+  // The chosen clients drive which campaigns are offered (grouped per client). The rows exported
+  // are still the current filtered list.
+  const [allClients, setAllClients] = useState<{ id: string; client_name: string | null; lead_count: number }[]>([]);
+  const [selectedClientIds, setSelectedClientIds] = useState<Set<string>>(new Set());
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
-  const [campaignId, setCampaignId] = useState("");
+  const [selectedCampaigns, setSelectedCampaigns] = useState<Set<string>>(new Set()); // bison_campaigns.id
+  const [loadingCampaigns, setLoadingCampaigns] = useState(false);
+  const knownCampaignIds = useRef<Set<string>>(new Set());
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [cols, setCols] = useState<Set<string>>(new Set(ALL_KEYS));
   const [busy, setBusy] = useState(false);
-
-  // Clients come from orch_clients — the shared table other apps (the orchestrator) maintain.
-  useEffect(() => {
-    if (open) {
-      fetch("/api/orch/clients")
-        .then((r) => r.json())
-        .then((j) => setClients(j.clients ?? []));
-    }
-  }, [open]);
 
   // Portal clients come from the portal's own admin directory (names only — tokens stay
   // server-side); fetched lazily the first time the portal method is picked.
@@ -91,23 +83,52 @@ export function ExportDialog({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, method]);
 
+  // Seed the export's client selection from the filter each time the dialog opens (editable after).
   useEffect(() => {
-    if (clientId) {
-      const target = clients.find((c) => c.id === clientId)?.bison_campaign_id ?? null;
-      fetch(`/api/bison/campaigns?orchClientId=${clientId}`)
-        .then((r) => r.json())
-        .then((j) => {
-          const list: Campaign[] = j.campaigns ?? [];
-          setCampaigns(list);
-          // the client's designated campaign (orch_clients.bison_campaign_id) is the default
-          setCampaignId(list.find((c) => c.bison_id === target)?.id ?? "");
-        });
-    } else {
-      setCampaigns([]);
-      setCampaignId("");
-    }
+    if (open) setSelectedClientIds(new Set(filters.orchClientIds ?? []));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clientId]);
+  }, [open]);
+
+  // All clients (independent of the filter) for the export's own client picker.
+  useEffect(() => {
+    if (!open || method !== "campaign") return;
+    fetch("/api/orch/clients")
+      .then((r) => r.json())
+      .then((j) => setAllClients(j.clients ?? []))
+      .catch(() => setAllClients([]));
+  }, [open, method]);
+
+  // Load campaigns for the currently-selected clients (grouped per client). Keeps still-valid
+  // campaign picks and pre-checks the default campaign of any newly-added client.
+  const clientKey = [...selectedClientIds].sort().join(",");
+  useEffect(() => {
+    if (!open || method !== "campaign" || selectedClientIds.size === 0) {
+      setCampaigns([]);
+      setSelectedCampaigns(new Set());
+      knownCampaignIds.current = new Set();
+      return;
+    }
+    setLoadingCampaigns(true);
+    fetch(`/api/bison/campaigns?orchClientIds=${encodeURIComponent(clientKey)}`)
+      .then((r) => r.json())
+      .then((j) => {
+        const list: Campaign[] = j.campaigns ?? [];
+        setCampaigns(list);
+        setSelectedCampaigns((prev) => {
+          const present = new Set(list.map((c) => c.id));
+          const next = new Set([...prev].filter((id) => present.has(id))); // keep valid picks
+          for (const c of list) if (c.is_default && !knownCampaignIds.current.has(c.id)) next.add(c.id); // default-check new clients
+          return next;
+        });
+        knownCampaignIds.current = new Set(list.map((c) => c.id));
+      })
+      .catch(() => {
+        setCampaigns([]);
+        setSelectedCampaigns(new Set());
+      })
+      .finally(() => setLoadingCampaigns(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, method, clientKey]);
 
   // In Office mode the export is "all agents belonging to the chosen offices".
   const office = mode === "office";
@@ -139,30 +160,58 @@ export function ExportDialog({
       else n.add(k);
       return n;
     });
+  const toggleCampaign = (id: string) =>
+    setSelectedCampaigns((s) => {
+      const n = new Set(s);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
+  const toggleClient = (id: string) =>
+    setSelectedClientIds((s) => {
+      const n = new Set(s);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
 
-  // Send to campaign: queues the agents as an enrichment batch. The enrich-worker finds and
-  // verifies an email for each (cached results reused), skips leads already in one of this
-  // client's campaigns, and pushes the rest into the chosen EmailBison campaign.
+  // Group the selected clients' campaigns under each client for the grouped multi-select.
+  const campaignGroups = Object.values(
+    campaigns.reduce((acc, c) => {
+      const key = c.client_id ?? c.client_name ?? "unknown";
+      (acc[key] ??= { clientName: c.client_name ?? "Client", items: [] as Campaign[] }).items.push(c);
+      return acc;
+    }, {} as Record<string, { clientName: string; items: Campaign[] }>)
+  );
+  const withCampaigns = new Set(campaigns.map((c) => c.client_id));
+  const missingCount = [...selectedClientIds].filter((id) => !withCampaigns.has(id)).length;
+
+  // Send to campaign: queues the merged agent list as ONE enrichment batch targeting every
+  // chosen campaign (across the selected clients). The enrich-worker finds + verifies an email
+  // for each agent (cached results reused), then attaches the lead to each chosen campaign,
+  // skipping a campaign only if the agent is already in another campaign of that campaign's
+  // own client (per-campaign, per-client dedup).
   async function sendCampaign() {
-    if (!clientId) {
-      toast.error("Select a client");
-      return;
-    }
-    const campaign = campaigns.find((c) => c.id === campaignId);
-    if (!campaign) {
-      toast.error("Select a campaign");
+    const chosen = campaigns.filter((c) => selectedCampaigns.has(c.id));
+    if (chosen.length === 0) {
+      toast.error("Select at least one campaign");
       return;
     }
     setBusy(true);
     const res = await fetch("/api/enrichment/send", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...reqBody(), orchClientId: clientId, campaignId: campaign.bison_id, campaignName: campaign.name ?? null, sourcePriority }),
+      body: JSON.stringify({
+        ...reqBody(),
+        orchClientIds: [...selectedClientIds],
+        campaigns: chosen.map((c) => ({ id: c.bison_id, name: c.name, clientId: c.client_id })),
+        sourcePriority,
+      }),
     });
     setBusy(false);
     const j = await res.json().catch(() => ({}));
     if (res.ok) {
-      toast.success(`Queued ${j.queued} agents — enriching now, then into “${campaign.name}”. Track progress in Admin → Activity.`, { duration: 8000 });
+      toast.success(`Queued ${j.queued} agents — enriching now, then into ${chosen.length} campaign${chosen.length > 1 ? "s" : ""}. Track progress in Admin → Activity.`, { duration: 8000 });
       onOpenChange(false);
     } else {
       toast.error(j.error ?? "Send failed");
@@ -217,7 +266,7 @@ export function ExportDialog({
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = "broker-staffer-agents.csv";
+      a.download = "brokerstaffer-agents.csv";
       a.click();
       URL.revokeObjectURL(url);
       toast.success("CSV downloaded");
@@ -229,11 +278,11 @@ export function ExportDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="sm:max-w-xl">
         <DialogHeader>
           <DialogTitle>Export agents</DialogTitle>
         </DialogHeader>
-        <div className="space-y-4">
+        <div className="max-h-[75vh] min-w-0 space-y-4 overflow-y-auto pr-1">
           {/* method */}
           <div>
             <label className="text-sm font-medium text-neutral-700">Method</label>
@@ -257,41 +306,91 @@ export function ExportDialog({
           {/* campaign options */}
           {method === "campaign" && (
             <>
+              {/* Clients — multi-select, ALL clients, pre-seeded from the filter but editable */}
               <div>
-                <label className="text-sm font-medium text-neutral-700">Client</label>
-                <Select value={clientId} onValueChange={setClientId}>
-                  <SelectTrigger className="mt-1">
-                    <SelectValue placeholder="Select a client" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {clients.map((c) => (
-                      <SelectItem key={c.id} value={c.id}>
-                        {c.client_name ?? "Unnamed client"}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {clients.length === 0 && <p className="mt-1 text-xs text-neutral-500">No clients yet — they appear here once onboarded (orch_clients).</p>}
+                <div className="flex items-center justify-between">
+                  <label className="text-sm font-medium text-neutral-700">
+                    Clients <span className="font-normal text-neutral-400">({selectedClientIds.size} selected)</span>
+                  </label>
+                  <div className="flex gap-3 text-xs">
+                    <button type="button" className="text-neutral-600 hover:underline" onClick={() => setSelectedClientIds(new Set(allClients.map((c) => c.id)))}>
+                      Select all
+                    </button>
+                    <button type="button" className="text-neutral-600 hover:underline" onClick={() => setSelectedClientIds(new Set())}>
+                      Clear
+                    </button>
+                  </div>
+                </div>
+                <div className="mt-1.5 max-h-40 space-y-1 overflow-auto rounded-lg border border-neutral-200 p-3">
+                  {allClients.length === 0 ? (
+                    <p className="py-3 text-center text-sm text-neutral-400">No clients yet.</p>
+                  ) : (
+                    allClients.map((c) => (
+                      <label key={c.id} className="flex items-center gap-2 text-sm text-neutral-800">
+                        <Checkbox checked={selectedClientIds.has(c.id)} onCheckedChange={() => toggleClient(c.id)} />
+                        <span className="min-w-0 flex-1 truncate" title={c.client_name ?? "Unnamed client"}>{c.client_name ?? "Unnamed client"}</span>
+                        <span className="shrink-0 text-xs text-neutral-400">{(c.lead_count ?? 0).toLocaleString()} leads</span>
+                      </label>
+                    ))
+                  )}
+                </div>
               </div>
-              <div>
-                <label className="text-sm font-medium text-neutral-700">EmailBison campaign</label>
-                <Select value={campaignId} onValueChange={setCampaignId} disabled={!clientId || campaigns.length === 0}>
-                  <SelectTrigger className="mt-1">
-                    <SelectValue placeholder={campaigns.length ? "Select a campaign" : "No campaigns synced yet"} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {campaigns.map((c) => (
-                      <SelectItem key={c.id} value={c.id}>
-                        {c.name ?? c.bison_campaign_id}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+
+              {/* Campaigns — grouped by the selected clients */}
+              {selectedClientIds.size === 0 ? (
+                <div className="rounded-lg border border-dashed border-neutral-300 bg-neutral-50 px-3 py-4 text-sm text-neutral-600">
+                  Select one or more clients above to choose their campaigns.
+                </div>
+              ) : (
+                <div>
+                  <div className="flex items-center justify-between">
+                    <label className="text-sm font-medium text-neutral-700">
+                      Campaigns <span className="font-normal text-neutral-400">({selectedCampaigns.size} selected)</span>
+                    </label>
+                    <div className="flex gap-3 text-xs">
+                      <button type="button" className="text-neutral-600 hover:underline" onClick={() => setSelectedCampaigns(new Set(campaigns.map((c) => c.id)))}>
+                        Select all
+                      </button>
+                      <button type="button" className="text-neutral-600 hover:underline" onClick={() => setSelectedCampaigns(new Set())}>
+                        Clear
+                      </button>
+                    </div>
+                  </div>
+                  <div className="mt-1.5 max-h-56 space-y-3 overflow-auto rounded-lg border border-neutral-200 p-3">
+                    {loadingCampaigns ? (
+                      <p className="py-4 text-center text-sm text-neutral-400">Loading campaigns…</p>
+                    ) : campaigns.length === 0 ? (
+                      <p className="py-4 text-center text-sm text-neutral-400">No campaigns synced for the selected client{selectedClientIds.size > 1 ? "s" : ""}.</p>
+                    ) : (
+                      campaignGroups.map((g) => (
+                        <div key={g.clientName}>
+                          <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-neutral-400">{g.clientName}</div>
+                          <div className="space-y-1">
+                            {g.items.map((c) => (
+                              <label key={c.id} className="flex items-center gap-2 text-sm text-neutral-800">
+                                <Checkbox checked={selectedCampaigns.has(c.id)} onCheckedChange={() => toggleCampaign(c.id)} />
+                                <span className="min-w-0 flex-1 truncate" title={c.name ?? c.bison_campaign_id}>{c.name ?? c.bison_campaign_id}</span>
+                                {c.is_default && (
+                                  <span className="shrink-0 rounded bg-neutral-100 px-1.5 py-0.5 text-[10px] font-medium text-neutral-500">default</span>
+                                )}
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                  {missingCount > 0 && !loadingCampaigns && (
+                    <p className="mt-1 text-xs text-amber-600">
+                      {missingCount} selected client{missingCount > 1 ? "s have" : " has"} no synced campaigns.
+                    </p>
+                  )}
+                </div>
+              )}
               <div>
                 <label className="text-sm font-medium text-neutral-700">Data priority</label>
                 <div className="mt-1.5 grid grid-cols-3 gap-2">
-                  {([["courted", "Courted"], ["zillow", "Zillow"], ["realtor", "Realtor"]] as const).map(([s, lbl]) => (
+                  {([["courted", "MLS"], ["zillow", "Zillow"], ["realtor", "Realtor"]] as const).map(([s, lbl]) => (
                     <button
                       key={s}
                       type="button"
@@ -307,12 +406,12 @@ export function ExportDialog({
                 </div>
                 <p className="mt-1 text-xs text-neutral-500">
                   Which source’s values win for the lead fields — blanks fall back to the next source
-                  ({sourcePriority === "courted" ? "Courted → Zillow → Realtor" : sourcePriority === "zillow" ? "Zillow → Courted → Realtor" : "Realtor → Courted → Zillow"}).
+                  ({sourcePriority === "courted" ? "MLS → Zillow → Realtor" : sourcePriority === "zillow" ? "Zillow → MLS → Realtor" : "Realtor → MLS → Zillow"}).
                 </p>
               </div>
               <p className="text-xs text-neutral-500">
-                Each agent is enriched (email found + verified), leads already in this client’s campaigns are skipped, and the rest are
-                uploaded into the campaign with all custom variables.
+                Each agent is enriched (email found + verified), then added to every selected campaign with all custom variables. A
+                campaign is skipped for an agent only if they’re already in another campaign of that campaign’s client.
               </p>
             </>
           )}
@@ -414,8 +513,8 @@ export function ExportDialog({
             Cancel
           </Button>
           {method === "campaign" ? (
-            <Button onClick={sendCampaign} disabled={busy || !clientId || !campaignId}>
-              {busy ? "Queueing…" : "Send to campaign"}
+            <Button onClick={sendCampaign} disabled={busy || selectedCampaigns.size === 0}>
+              {busy ? "Queueing…" : `Send to campaign${selectedCampaigns.size > 1 ? "s" : ""}`}
             </Button>
           ) : method === "portal" ? (
             <Button onClick={sendPortal} disabled={busy || !portalClient}>

@@ -20,7 +20,7 @@ import { SavedViews } from "./saved-views";
 import { EditColumnsModal } from "./edit-columns";
 import { AllFiltersDrawer } from "./all-filters-drawer";
 import { OfficeProfile } from "./office-profile";
-import { DEFAULT_FILTERS, SALES_VOLUME_BUCKETS, COUNT_BUCKETS, YEAR_BUCKETS, GCI_BUCKETS, activeFilterCount } from "@/types/agent-filters";
+import { DEFAULT_FILTERS, SALES_VOLUME_BUCKETS, COUNT_BUCKETS, YEAR_BUCKETS, GCI_BUCKETS, activeFilterCount, normalizeFilters } from "@/types/agent-filters";
 import type { Filters } from "@/types/agent-filters";
 import { useNameSearch } from "@/lib/stores/name-search";
 
@@ -87,6 +87,9 @@ interface Col {
   key: string;
   label: string;
   sortBy?: string;
+  // First click on this header sorts this direction (default "desc"). Text columns like MLS /
+  // LinkedIn use "asc" so the first click gives A-Z.
+  defaultDir?: SortDir;
   align?: "right";
   render: (a: Agent) => React.ReactNode;
 }
@@ -101,7 +104,7 @@ const COLUMNS: Col[] = [
   { key: "office", label: "Office", sortBy: "office_name", render: (a) => na(a.office_name) },
   { key: "timeInd", label: "Est. time in industry", sortBy: "est_time_in_industry_months", render: (a) => a.est_time_in_industry_raw ?? "N/A" },
   { key: "license", label: "License number", sortBy: "license_number", render: (a) => na(a.license_number) },
-  { key: "mlsAff", label: "MLS affiliation", render: (a) => mlsCodes(a) },
+  { key: "mlsAff", label: "MLS affiliation", sortBy: "mls", defaultDir: "asc", render: (a) => mlsCodes(a) },
   { key: "mlsId", label: "MLS ID", render: (a) => mlsIds(a) },
   { key: "homeCity", label: "Home city", sortBy: "home_city", render: (a) => (a.home_city ? `${a.home_city}${a.home_state ? `, ${a.home_state}` : ""}` : "N/A") },
   { key: "homeZip", label: "Home zip", sortBy: "home_zip", render: (a) => na(a.home_zip) },
@@ -126,7 +129,7 @@ const COLUMNS: Col[] = [
   { key: "email", label: "Preferred email address", sortBy: "preferred_email", render: (a) => na(a.preferred_email) },
   { key: "phone", label: "Preferred phone number", sortBy: "preferred_phone", render: (a) => phoneFmt(a.preferred_phone) },
   // Zillow/Realtor-only fields (all-time stats + extras — separate from the LTM metrics)
-  { key: "linkedin", label: "LinkedIn", render: (a) => {
+  { key: "linkedin", label: "LinkedIn", sortBy: "linkedin_url", defaultDir: "asc", render: (a) => {
       if (!a.linkedin_url) return <span className="text-neutral-400">N/A</span>;
       const url = String(a.linkedin_url);
       return <a href={/^https?:\/\//i.test(url) ? url : `https://${url}`} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">Profile</a>;
@@ -168,6 +171,50 @@ const OFFICE_COLUMNS: Col[] = [
     },
   },
 ];
+
+// Which table columns each ACTIVE filter acts on — those headers get a light-gray tint so it's
+// obvious at a glance which columns are being filtered. Keys match COLUMNS / OFFICE_COLUMNS.
+function highlightedColumns(f: Filters, mode: SearchMode): Set<string> {
+  const s = new Set<string>();
+  const active = (r: { buckets: string[]; min: string; max: string }) => r.buckets.length > 0 || !!r.min || !!r.max;
+  const ie = (x: { include: string[]; exclude: string[] }) => x.include.length > 0 || x.exclude.length > 0;
+
+  if (f.location.values.length > 0) {
+    const zip = f.location.field === "zip";
+    if (mode === "office") {
+      s.add(zip ? "officeZip" : "officeCity");
+    } else {
+      for (const k of f.location.appliesTo) {
+        if (k === "office") s.add(zip ? "officeZip" : "officeCity");
+        else if (k === "home") s.add(zip ? "homeZip" : "homeCity");
+        else if (k === "transacted") s.add("transacted");
+      }
+    }
+  }
+  if (active(f.salesVolume)) s.add(f.salesVolume.side === "list" ? "list$" : f.salesVolume.side === "buy" ? "buy$" : "vol");
+  if (active(f.closedUnits)) s.add(f.closedUnits.side === "list" ? "listN" : f.closedUnits.side === "buy" ? "buyN" : "units");
+  if (active(f.closedTransactions)) s.add(f.closedTransactions.side === "list" ? "listN" : f.closedTransactions.side === "buy" ? "buyN" : "closedTx");
+  if (active(f.estTimeInIndustry)) s.add("timeInd");
+  if (active(f.approxGci)) s.add("gci");
+  if (active(f.avgSalePrice)) s.add("avgPrice");
+  if (active(f.estTimeInOffice)) s.add("timeOffice");
+  if (active(f.avgTimeAtOffice)) s.add("avgTimeOffice");
+  if (mode === "office" && active(f.agentCount)) s.add("agentCount");
+  if (ie(f.officeSearch.brand)) s.add("brand");
+  if (ie(f.officeSearch.office)) s.add("office");
+  if (ie(f.mls)) s.add("mlsAff");
+  if (ie(f.license)) s.add("license");
+  if (ie(f.name)) s.add("agent");
+  if (f.missingContact.email) s.add("email");
+  if (f.missingContact.phone) s.add("phone");
+  const z = f.zillowRealtor;
+  if (z.languages.length > 0) s.add("languages");
+  if (z.totalSales.min || z.totalSales.max) s.add("totalSalesAT");
+  if (z.avgPriceAllTime.min || z.avgPriceAllTime.max) s.add("avgPriceAT");
+  if (z.avgVolumeAllTime.min || z.avgVolumeAllTime.max) s.add("avgVolAT");
+  if (z.hasLinkedin) s.add("linkedin");
+  return s;
+}
 
 export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
   const [rows, setRows] = useState<Agent[]>([]);
@@ -220,6 +267,8 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
 
   // (nameQuery is a find/highlight tool, not a filter, so it does not count here.)
   const filterCount = activeFilterCount(filters, mode);
+  // Columns whose filter is active — their headers/cells get a light-gray tint.
+  const highlightedCols = highlightedColumns(filters, mode);
 
   function setF<K extends keyof Filters>(k: K, v: Filters[K]) {
     setFilters((p) => ({ ...p, [k]: v }));
@@ -310,7 +359,7 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
     if (sortBy === col.sortBy) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
     else {
       setSortBy(col.sortBy);
-      setSortDir("desc");
+      setSortDir(col.defaultDir ?? "desc");
     }
     setPage(1);
   }
@@ -359,7 +408,7 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
             ))}
           </div>
           <div className="inline-flex rounded-lg border border-neutral-300 bg-white p-0.5 text-sm">
-            {([["all", "All"], ["courted", "Courted"], ["zillow_realtor", "Zillow / Realtor"]] as const).map(([s, lbl]) => (
+            {([["all", "All"], ["courted", "MLS"], ["zillow_realtor", "Zillow / Realtor"]] as const).map(([s, lbl]) => (
               <button
                 key={s}
                 type="button"
@@ -387,7 +436,7 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
           )}
           {/* Only the filters the current mode's query actually applies are shown — office
               mode narrows on location / volume / office / units / agent count / client. */}
-          <ClientPopover value={filters.orchClientId} clientMode={filters.orchClientMode} onChange={(id, m) => { setFilters((p) => ({ ...p, orchClientId: id, orchClientMode: m })); setPage(1); }} />
+          <ClientPopover value={filters.orchClientIds} clientMode={filters.orchClientMode} onChange={(ids, m) => { setFilters((p) => ({ ...p, orchClientIds: ids, orchClientMode: m })); setPage(1); }} />
           <LocationPopover value={filters.location} onChange={(v) => setF("location", v)} officeMode={mode === "office"} />
           <RangePopover label="Sales volume" hasSide prefix="$" buckets={SALES_VOLUME_BUCKETS} value={filters.salesVolume} onChange={(v) => setF("salesVolume", v)} />
           <OfficeSearchPopover value={filters.officeSearch} onChange={(v) => setF("officeSearch", v)} />
@@ -464,7 +513,7 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
             <SavedViews
               filters={filters}
               onLoad={(f) => {
-                setFilters({ ...DEFAULT_FILTERS, ...f }); // older saved views may predate newer filter keys
+                setFilters(normalizeFilters(f)); // fills newer keys + folds legacy orchClientId -> orchClientIds
                 setNameSearch(f.nameQuery ?? ""); // keep the top-bar search box in sync with the loaded view
                 setPage(1);
               }}
@@ -485,7 +534,7 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
                   return (
                     <th
                       key={col.key}
-                      className={`whitespace-nowrap px-4 py-2.5 text-[13px] font-medium text-neutral-500 ${col.align === "right" ? "text-right" : "text-left"}`}
+                      className={`whitespace-nowrap px-4 py-2.5 text-[13px] font-medium text-neutral-500 ${col.align === "right" ? "text-right" : "text-left"} ${highlightedCols.has(col.key) ? "bg-neutral-100" : ""}`}
                     >
                       {col.sortBy ? (
                         <button
@@ -538,7 +587,7 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
                         return (
                           <td
                             key={col.key}
-                            className={`whitespace-nowrap px-4 py-3 text-neutral-700 ${col.align === "right" ? "text-right tabular-nums" : "text-left"} ${cellHit ? "bg-green-200/70" : ""}`}
+                            className={`whitespace-nowrap px-4 py-3 text-neutral-700 ${col.align === "right" ? "text-right tabular-nums" : "text-left"} ${cellHit ? "bg-green-200/70" : highlightedCols.has(col.key) ? "bg-neutral-50" : ""}`}
                           >
                             {col.render(a)}
                           </td>

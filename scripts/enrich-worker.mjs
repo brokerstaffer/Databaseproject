@@ -167,13 +167,17 @@ async function campaignNameById(id) {
   return name;
 }
 
-// Returns the name of the same-client campaign the lead is already in, or null.
-async function leadUsedByClient(lead, clientName) {
-  const target = clientPrefix(clientName);
-  if (!target) return null;
+// Per-campaign, per-client dedup. For a target campaign, return the name of a DIFFERENT
+// (non-targeted) campaign of that SAME campaign's client the lead is already in — meaning we
+// should skip attaching to the target (don't double-contact within a client). Campaigns the
+// batch is deliberately targeting (chosenIds) never block. Returns null = ok to attach.
+async function leadBlockedForCampaign(lead, targetCampaignId, chosenIds) {
+  const targetClient = clientPrefix(await campaignNameById(targetCampaignId));
+  if (!targetClient) return null;
   for (const c of lead?.lead_campaign_data ?? []) {
+    if (chosenIds.has(String(c.campaign_id))) continue; // a campaign we're deliberately targeting
     const name = await campaignNameById(c.campaign_id);
-    if (name && clientPrefix(name) === target) return name;
+    if (name && clientPrefix(name) === targetClient) return name;
   }
   return null;
 }
@@ -399,7 +403,7 @@ async function refreshActiveBatches() {
       where b.status = 'done'
         and b.sent > 0
         and b.campaign_id is not null
-        and coalesce(bc.raw->>'id', bc.bison_campaign_id) = b.campaign_id
+        and coalesce(bc.raw->>'id', bc.bison_campaign_id) = any(coalesce(b.campaign_ids, array[b.campaign_id]))
         and bc.leads_imported_campaign is distinct from true`
   );
 }
@@ -525,17 +529,16 @@ async function pushCycle() {
   if (items.length === 0) return false;
   const agents = await loadAgents(items.map((i) => i.agent_id));
   const { rows: batches } = await pool.query(
-    `select b.id, b.campaign_id, b.status, b.source_priority,
-            coalesce(oc.client_name, c.name, split_part(b.campaign_name, ' + ', 1)) as client_name
-       from enrichment_batches b
-       left join clients c on c.id = b.client_id
-       left join orch_clients oc on oc.id = b.orch_client_id
-      where b.id = any($1::uuid[])`,
+    `select b.id, b.campaign_id, b.campaign_ids, b.status, b.source_priority
+       from enrichment_batches b where b.id = any($1::uuid[])`,
     [[...new Set(items.map((i) => i.batch_id))]]
   );
   const batchOf = new Map(batches.map((b) => [b.id, b]));
 
-  const toAttach = new Map(); // campaign_id -> [{item, leadId}]
+  const toAttach = new Map();      // campaign_id -> [{ item, leadId }]
+  const targetsByItem = new Map(); // item.id -> how many campaigns we will attach it to
+  const itemById = new Map();      // item.id -> item (for finalize)
+
   for (let n = 0; n < items.length; n++) {
     const item = items[n];
     if (shuttingDown) {
@@ -552,22 +555,34 @@ async function pushCycle() {
       await setItem(item, token, { status: "failed", error: !agent ? "agent no longer exists" : "item has no email", claimed_at: null });
       continue;
     }
+    // Every campaign this batch targets (campaign_ids; falls back to the single campaign_id).
+    const chosen = (batch.campaign_ids?.length ? batch.campaign_ids : [batch.campaign_id]).filter(Boolean).map(String);
+    const chosenSet = new Set(chosen);
     try {
       const payload = mapAgentToBisonLead(agent, item.email, agent.mls_code, orderFor(batch.source_priority));
-      // Does this lead already exist in the workspace? (also our client-dedup source)
+      // Does this lead already exist in the workspace? (also our per-client dedup source)
       const existing = await findBisonLeadByEmail(item.email);
-      if (existing) {
-        // CLIENT-SCOPE DEDUP: already in one of this client's campaigns -> don't re-upload.
-        const usedIn = await leadUsedByClient(existing, batch.client_name);
-        if (usedIn) {
-          await setItem(item, token, {
-            status: "skipped", bison_lead_id: String(existing.id),
-            error: null, claimed_at: null,
-            step_log: (item.step_log ?? []).concat([{ step: "client_dedup", ok: true, ms: 0, note: `already in "${usedIn}"` }]),
-          });
-          continue;
-        }
+
+      // Per target campaign: attach, unless the lead is already in a non-targeted campaign of
+      // that campaign's own client (per-campaign, per-client dedup).
+      const attachTo = [];
+      const skipNotes = [];
+      for (const cid of chosen) {
+        const blockedBy = existing ? await leadBlockedForCampaign(existing, cid, chosenSet) : null;
+        if (blockedBy) skipNotes.push({ step: "client_dedup", ok: true, ms: 0, note: `skip campaign ${cid}: already in "${blockedBy}"` });
+        else attachTo.push(cid);
       }
+
+      if (attachTo.length === 0) {
+        // every target campaign deduped -> terminal skip (no lead create/refresh needed)
+        await setItem(item, token, {
+          status: "skipped", bison_lead_id: existing ? String(existing.id) : (item.bison_lead_id ?? null),
+          error: null, claimed_at: null,
+          step_log: (item.step_log ?? []).concat(skipNotes),
+        });
+        continue;
+      }
+
       // Crash recovery: reuse a previously-created lead id — never duplicate.
       let leadId = item.bison_lead_id ?? (existing ? String(existing.id) : null);
       if (existing) {
@@ -575,30 +590,47 @@ async function pushCycle() {
       } else if (!leadId) {
         leadId = await upsertBisonLead(payload);
       }
-      await setItem(item, token, { bison_lead_id: leadId }); // persist BEFORE attach
-      if (!toAttach.has(batch.campaign_id)) toAttach.set(batch.campaign_id, []);
-      toAttach.get(batch.campaign_id).push({ item, leadId });
+      await setItem(item, token, { bison_lead_id: leadId, step_log: (item.step_log ?? []).concat(skipNotes) }); // persist BEFORE attach
+      item.bison_lead_id = leadId;
+      for (const cid of attachTo) {
+        if (!toAttach.has(cid)) toAttach.set(cid, []);
+        toAttach.get(cid).push({ item, leadId });
+      }
+      targetsByItem.set(item.id, attachTo.length);
+      itemById.set(item.id, item);
     } catch (e) {
       await failOrRetry(item, token, "enriched", e);
     }
   }
 
+  // Attach per campaign in chunks; tally per-item successes across all its campaigns.
+  const okByItem = new Map();  // item.id -> campaigns attached ok
+  const errByItem = new Map(); // item.id -> last attach error
   for (const [campaignId, entries] of toAttach) {
-    // per-chunk attach + per-chunk marking, so an already-attached chunk is never re-queued
     for (let i = 0; i < entries.length; i += 100) {
       const chunk = entries.slice(i, i + 100);
       try {
         await bison("POST", `/campaigns/${campaignId}/leads/attach-leads`, { lead_ids: chunk.map((e) => e.leadId) });
-        for (const { item, leadId } of chunk) {
-          try {
-            await setItem(item, token, { status: "sent", attempts: 0, bison_lead_id: leadId, error: null, claimed_at: null });
-          } catch (e) {
-            console.error(`mark-sent failed for item ${item.id}:`, e instanceof Error ? e.message : e);
-          }
-        }
+        for (const { item } of chunk) okByItem.set(item.id, (okByItem.get(item.id) ?? 0) + 1);
       } catch (e) {
-        for (const { item } of chunk) await failOrRetry(item, token, "enriched", e);
+        for (const { item } of chunk) errByItem.set(item.id, e);
       }
+    }
+  }
+
+  // Finalize: 'sent' once a lead is attached to ALL its target campaigns; otherwise retry (a
+  // retry re-attaches every target — attach-leads is idempotent, so already-attached is fine).
+  for (const [id, item] of itemById) {
+    const need = targetsByItem.get(id) ?? 0;
+    const ok = okByItem.get(id) ?? 0;
+    if (need > 0 && ok >= need) {
+      try {
+        await setItem(item, token, { status: "sent", attempts: 0, bison_lead_id: item.bison_lead_id ?? null, error: null, claimed_at: null });
+      } catch (e) {
+        console.error(`mark-sent failed for item ${item.id}:`, e instanceof Error ? e.message : e);
+      }
+    } else {
+      await failOrRetry(item, token, "enriched", errByItem.get(id) ?? new Error("attach incomplete"));
     }
   }
   return true;

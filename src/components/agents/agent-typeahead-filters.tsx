@@ -12,6 +12,7 @@ import type { IncludeExclude, LocationField, LocationFilter, LocationKind, Offic
 export function useTypeahead(type: string, field?: string) {
   const [query, setQuery] = useState("");
   const [options, setOptions] = useState<string[]>([]);
+  const [total, setTotal] = useState(0); // count of the unfiltered list = "total available"
   useEffect(() => {
     let active = true;
     const t = setTimeout(async () => {
@@ -20,7 +21,11 @@ export function useTypeahead(type: string, field?: string) {
       try {
         const res = await fetch(`/api/search/options?${p.toString()}`);
         const json = await res.json();
-        if (active) setOptions(Array.isArray(json.options) ? (json.options as string[]) : []);
+        if (active) {
+          const opts = Array.isArray(json.options) ? (json.options as string[]) : [];
+          setOptions(opts);
+          if (!query.trim()) setTotal(opts.length);
+        }
       } catch {
         /* ignore */
       }
@@ -30,7 +35,72 @@ export function useTypeahead(type: string, field?: string) {
       clearTimeout(t);
     };
   }, [type, field, query]);
-  return { query, setQuery, options };
+  return { query, setQuery, options, total };
+}
+
+// Plain search input (no dropdown) — pairs with the always-visible CheckList below it.
+function SearchInput({ placeholder, value, onChange }: { placeholder: string; value: string; onChange: (v: string) => void }) {
+  return (
+    <div className="relative">
+      <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400" />
+      <input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        className="h-10 w-full rounded-lg border border-neutral-300 pl-9 pr-3 text-sm placeholder:text-neutral-400 focus:border-neutral-400 focus:outline-none"
+      />
+    </div>
+  );
+}
+
+// "X out of Y selected" + Clear, shown above every CheckList.
+function CountRow({ selected, total, onClear }: { selected: number; total: number; onClear: () => void }) {
+  return (
+    <div className="mt-2 flex items-center justify-between px-1 text-xs">
+      <span className="text-neutral-400">{selected} out of {total} selected</span>
+      <button type="button" className="text-neutral-600 hover:underline" onClick={onClear}>
+        Clear
+      </button>
+    </div>
+  );
+}
+
+// Always-visible checkbox list with a "Select All" row at the top (selects/clears everything
+// currently shown). Options appear immediately when the filter opens.
+function CheckList({
+  options,
+  isSelected,
+  onToggle,
+  onSelectAll,
+  emptyText = "No results.",
+}: {
+  options: string[];
+  isSelected: (o: string) => boolean;
+  onToggle: (o: string) => void;
+  onSelectAll: (shown: string[], allSelected: boolean) => void;
+  emptyText?: string;
+}) {
+  const allSel = options.length > 0 && options.every(isSelected);
+  return (
+    <div className="mt-1 max-h-56 space-y-0.5 overflow-auto">
+      {options.length === 0 ? (
+        <div className="px-1 py-2 text-sm text-neutral-400">{emptyText}</div>
+      ) : (
+        <>
+          <label className="flex items-center gap-2 rounded px-1 py-1.5 text-sm font-medium text-neutral-800 hover:bg-neutral-50">
+            <Checkbox checked={allSel} onCheckedChange={() => onSelectAll(options, allSel)} />
+            Select All
+          </label>
+          {options.map((o) => (
+            <label key={o} className="flex items-center gap-2 rounded px-1 py-1.5 text-sm text-neutral-800 hover:bg-neutral-50">
+              <Checkbox checked={isSelected(o)} onCheckedChange={() => onToggle(o)} />
+              <span className="truncate">{o}</span>
+            </label>
+          ))}
+        </>
+      )}
+    </div>
+  );
 }
 
 export function RadioOpt({ label, on, onClick }: { label: string; on: boolean; onClick: () => void }) {
@@ -134,7 +204,7 @@ export function LocationPopover({ value, onChange, officeMode = false }: { value
   const [field, setField] = useState<LocationField>(value.field);
   const [kinds, setKinds] = useState<LocationKind[]>(value.appliesTo);
   const [values, setValues] = useState<string[]>(value.values);
-  const { query, setQuery, options } = useTypeahead("location", field);
+  const { query, setQuery, options, total } = useTypeahead("location", field);
 
   useEffect(() => {
     if (open) {
@@ -147,6 +217,9 @@ export function LocationPopover({ value, onChange, officeMode = false }: { value
 
   const label = LOCATION_FIELDS.find((f) => f[0] === field)?.[1] ?? "City";
   const toggleKind = (k: LocationKind) => setKinds((a) => (a.includes(k) ? a.filter((x) => x !== k) : [...a, k]));
+  const toggleValue = (v: string) => setValues((vs) => (vs.includes(v) ? vs.filter((x) => x !== v) : [...vs, v]));
+  const selectAllValues = (shown: string[], allSel: boolean) =>
+    setValues((vs) => (allSel ? vs.filter((v) => !shown.includes(v)) : Array.from(new Set([...vs, ...shown]))));
 
   return (
     <FilterPopoverShell
@@ -187,32 +260,11 @@ export function LocationPopover({ value, onChange, officeMode = false }: { value
           </SelectContent>
         </Select>
         <div className="flex-1">
-          <SearchBox
-            placeholder={`Search by ${label.toLowerCase()}`}
-            query={query}
-            setQuery={setQuery}
-            options={options.filter((o) => !values.includes(o))}
-            onPick={(v) => {
-              if (!values.includes(v) && values.length < 50) setValues([...values, v]); // hard 50 cap
-              setQuery("");
-            }}
-          />
+          <SearchInput placeholder={`Search by ${label.toLowerCase()}`} value={query} onChange={setQuery} />
         </div>
       </div>
-      <div className="mt-1 flex items-center justify-between text-xs">
-        {query.trim() && options.filter((o) => !values.includes(o)).length > 0 ? (
-          <button
-            type="button"
-            className="text-neutral-600 hover:underline"
-            onClick={() => setValues((vs) => Array.from(new Set([...vs, ...options])).slice(0, 50))}
-          >
-            Select all shown
-          </button>
-        ) : (
-          <span />
-        )}
-        <span className="text-neutral-400">{values.length}/50 selected</span>
-      </div>
+      <CountRow selected={values.length} total={Math.max(total, values.length)} onClear={() => setValues([])} />
+      <CheckList options={options} isSelected={(o) => values.includes(o)} onToggle={toggleValue} onSelectAll={selectAllValues} />
       <Chips items={values} onRemove={(v) => setValues(values.filter((x) => x !== v))} />
       {/* Office mode always filters on the OFFICE's location — the kind checkboxes only apply
           to agent searches, so they're hidden there instead of silently ignored. */}
@@ -239,7 +291,7 @@ export function OfficeSearchPopover({ value, onChange }: { value: OfficeSearchFi
   const [bExc, setBExc] = useState<string[]>(value.brand.exclude);
   const [oInc, setOInc] = useState<string[]>(value.office.include);
   const [oExc, setOExc] = useState<string[]>(value.office.exclude);
-  const { query, setQuery, options } = useTypeahead(entity);
+  const { query, setQuery, options, total } = useTypeahead(entity);
 
   useEffect(() => {
     if (open) {
@@ -252,25 +304,32 @@ export function OfficeSearchPopover({ value, onChange }: { value: OfficeSearchFi
   }, [open]);
 
   const count = value.brand.include.length + value.brand.exclude.length + value.office.include.length + value.office.exclude.length;
-  const taken = entity === "brand" ? [...bInc, ...bExc] : [...oInc, ...oExc];
+  const cur = entity === "brand" ? (mode === "include" ? bInc : bExc) : (mode === "include" ? oInc : oExc);
+  const setCur = entity === "brand" ? (mode === "include" ? setBInc : setBExc) : (mode === "include" ? setOInc : setOExc);
+  const setOther = entity === "brand" ? (mode === "include" ? setBExc : setBInc) : (mode === "include" ? setOExc : setOInc);
+  const totalSelected = bInc.length + bExc.length + oInc.length + oExc.length;
+  const toggleOne = (o: string) => {
+    if (cur.includes(o)) setCur((a) => a.filter((x) => x !== o));
+    else { setCur((a) => [...a, o]); setOther((a) => a.filter((x) => x !== o)); }
+  };
+  const selectAll = (shown: string[], allSel: boolean) => {
+    if (allSel) setCur((a) => a.filter((o) => !shown.includes(o)));
+    else { setCur((a) => Array.from(new Set([...a, ...shown]))); setOther((a) => a.filter((o) => !shown.includes(o))); }
+  };
 
-  const pick = (v: string) => {
+  // Flipping the Include/Exclude toggle re-buckets the CURRENT entity's existing chips, so
+  // "pick as Include → switch to Exclude → Apply" actually moves them. Previously the toggle
+  // only steered the next pick, so an existing chip stayed put and Apply was a no-op.
+  const switchMode = (m: "include" | "exclude") => {
+    setMode(m);
+    const uniq = (a: string[], b: string[]) => Array.from(new Set([...a, ...b]));
     if (entity === "brand") {
-      if (mode === "include") {
-        setBInc((a) => (a.includes(v) ? a : [...a, v]));
-        setBExc((a) => a.filter((x) => x !== v));
-      } else {
-        setBExc((a) => (a.includes(v) ? a : [...a, v]));
-        setBInc((a) => a.filter((x) => x !== v));
-      }
-    } else if (mode === "include") {
-      setOInc((a) => (a.includes(v) ? a : [...a, v]));
-      setOExc((a) => a.filter((x) => x !== v));
+      if (m === "exclude") { setBExc((x) => uniq(x, bInc)); setBInc([]); }
+      else { setBInc((x) => uniq(x, bExc)); setBExc([]); }
     } else {
-      setOExc((a) => (a.includes(v) ? a : [...a, v]));
-      setOInc((a) => a.filter((x) => x !== v));
+      if (m === "exclude") { setOExc((x) => uniq(x, oInc)); setOInc([]); }
+      else { setOInc((x) => uniq(x, oExc)); setOExc([]); }
     }
-    setQuery("");
   };
 
   return (
@@ -308,13 +367,14 @@ export function OfficeSearchPopover({ value, onChange }: { value: OfficeSearchFi
             <SelectItem value="office">Office</SelectItem>
           </SelectContent>
         </Select>
-        <RadioOpt label="Include" on={mode === "include"} onClick={() => setMode("include")} />
-        <RadioOpt label="Exclude" on={mode === "exclude"} onClick={() => setMode("exclude")} />
-        <span className="ml-auto text-xs text-neutral-400">{bInc.length + bExc.length + oInc.length + oExc.length} selected</span>
+        <RadioOpt label="Include" on={mode === "include"} onClick={() => switchMode("include")} />
+        <RadioOpt label="Exclude" on={mode === "exclude"} onClick={() => switchMode("exclude")} />
       </div>
       <div className="mt-2">
-        <SearchBox placeholder={`Search ${entity}`} query={query} setQuery={setQuery} options={options.filter((o) => !taken.includes(o))} onPick={pick} />
+        <SearchInput placeholder={`Search ${entity}`} value={query} onChange={setQuery} />
       </div>
+      <CountRow selected={totalSelected} total={Math.max(total, totalSelected)} onClear={() => { setBInc([]); setBExc([]); setOInc([]); setOExc([]); }} />
+      <CheckList options={options} isSelected={(o) => cur.includes(o)} onToggle={toggleOne} onSelectAll={selectAll} />
       {(bInc.length > 0 || bExc.length > 0) && (
         <div className="mt-3">
           <div className="text-xs font-medium text-neutral-500">Brand</div>
@@ -346,6 +406,7 @@ export function MlsPopover({ value, onChange }: { value: IncludeExclude; onChang
   const [items, setItems] = useState<MlsItem[]>([]);
   const [sel, setSel] = useState<string[]>(value.include);
   const [clients, setClients] = useState<string[]>([]);
+  const [total, setTotal] = useState(0); // total MLS available (from the unfiltered list)
 
   useEffect(() => {
     if (open) setSel(value.include);
@@ -358,7 +419,11 @@ export function MlsPopover({ value, onChange }: { value: IncludeExclude; onChang
       try {
         const res = await fetch(`/api/search/options?type=mls&q=${encodeURIComponent(q)}`);
         const json = await res.json();
-        if (active) setItems(Array.isArray(json.options) ? (json.options as MlsItem[]) : []);
+        const opts = Array.isArray(json.options) ? (json.options as MlsItem[]) : [];
+        if (active) {
+          setItems(opts);
+          if (q.trim() === "") setTotal(opts.length); // unfiltered list = the total MLS count
+        }
       } catch {
         /* ignore */
       }
@@ -418,7 +483,7 @@ export function MlsPopover({ value, onChange }: { value: IncludeExclude; onChang
         />
       </div>
       <div className="mt-2 flex items-center justify-between px-1 text-xs">
-        <span className="text-neutral-400">{sel.length} selected</span>
+        <span className="text-neutral-400">{sel.length} out of {Math.max(total, sel.length)} selected</span>
         <div className="flex gap-3">
           <button type="button" className="text-neutral-600 hover:underline" onClick={() => setSel((s) => Array.from(new Set([...s, ...items.map((m) => m.id)])))}>
             Select all shown
@@ -458,7 +523,7 @@ export function LicensePopover({ value, onChange }: { value: IncludeExclude; onC
   const [mode, setMode] = useState<"include" | "exclude">("include");
   const [inc, setInc] = useState<string[]>(value.include);
   const [exc, setExc] = useState<string[]>(value.exclude);
-  const { query, setQuery, options } = useTypeahead("license");
+  const { query, setQuery, options, total } = useTypeahead("license");
 
   useEffect(() => {
     if (open) {
@@ -469,16 +534,23 @@ export function LicensePopover({ value, onChange }: { value: IncludeExclude; onC
   }, [open]);
 
   const count = value.include.length + value.exclude.length;
-  const taken = [...inc, ...exc];
-  const pick = (v: string) => {
-    if (mode === "include") {
-      setInc((a) => (a.includes(v) ? a : [...a, v]));
-      setExc((a) => a.filter((x) => x !== v));
-    } else {
-      setExc((a) => (a.includes(v) ? a : [...a, v]));
-      setInc((a) => a.filter((x) => x !== v));
-    }
-    setQuery("");
+  const cur = mode === "include" ? inc : exc;
+  const setCur = mode === "include" ? setInc : setExc;
+  const setOther = mode === "include" ? setExc : setInc;
+  const toggleOne = (o: string) => {
+    if (cur.includes(o)) setCur((a) => a.filter((x) => x !== o));
+    else { setCur((a) => [...a, o]); setOther((a) => a.filter((x) => x !== o)); }
+  };
+  const selectAll = (shown: string[], allSel: boolean) => {
+    if (allSel) setCur((a) => a.filter((o) => !shown.includes(o)));
+    else { setCur((a) => Array.from(new Set([...a, ...shown]))); setOther((a) => a.filter((o) => !shown.includes(o))); }
+  };
+  // Flipping the toggle re-buckets the existing chips (see OfficeSearchPopover.switchMode).
+  const switchMode = (m: "include" | "exclude") => {
+    setMode(m);
+    const uniq = (a: string[], b: string[]) => Array.from(new Set([...a, ...b]));
+    if (m === "exclude") { setExc((x) => uniq(x, inc)); setInc([]); }
+    else { setInc((x) => uniq(x, exc)); setExc([]); }
   };
 
   return (
@@ -498,17 +570,16 @@ export function LicensePopover({ value, onChange }: { value: IncludeExclude; onC
         setOpen(false);
       }}
     >
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-6">
-          {/* Radios set which bucket the NEXT pick goes into; existing chips stay put. */}
-          <RadioOpt label="Include" on={mode === "include"} onClick={() => setMode("include")} />
-          <RadioOpt label="Exclude" on={mode === "exclude"} onClick={() => setMode("exclude")} />
-        </div>
-        <span className="text-xs text-neutral-400">{inc.length + exc.length} selected</span>
+      <div className="flex items-center gap-6">
+        {/* Flipping the toggle moves existing chips to that bucket (and steers new picks). */}
+        <RadioOpt label="Include" on={mode === "include"} onClick={() => switchMode("include")} />
+        <RadioOpt label="Exclude" on={mode === "exclude"} onClick={() => switchMode("exclude")} />
       </div>
       <div className="mt-2">
-        <SearchBox placeholder="Search license #" query={query} setQuery={setQuery} options={options.filter((o) => !taken.includes(o))} onPick={pick} />
+        <SearchInput placeholder="Search license #" value={query} onChange={setQuery} />
       </div>
+      <CountRow selected={inc.length + exc.length} total={Math.max(total, inc.length + exc.length)} onClear={() => { setInc([]); setExc([]); }} />
+      <CheckList options={options} isSelected={(o) => cur.includes(o)} onToggle={toggleOne} onSelectAll={selectAll} />
       <Chips items={inc} onRemove={(v) => setInc(inc.filter((x) => x !== v))} />
       <Chips items={exc} tone="exclude" onRemove={(v) => setExc(exc.filter((x) => x !== v))} />
     </FilterPopoverShell>
@@ -521,7 +592,7 @@ export function NamePopover({ value, onChange }: { value: IncludeExclude; onChan
   const [mode, setMode] = useState<"include" | "exclude">("include");
   const [inc, setInc] = useState<string[]>(value.include);
   const [exc, setExc] = useState<string[]>(value.exclude);
-  const { query, setQuery, options } = useTypeahead("name");
+  const { query, setQuery, options, total } = useTypeahead("name");
 
   useEffect(() => {
     if (open) {
@@ -532,16 +603,23 @@ export function NamePopover({ value, onChange }: { value: IncludeExclude; onChan
   }, [open]);
 
   const count = value.include.length + value.exclude.length;
-  const taken = [...inc, ...exc];
-  const pick = (v: string) => {
-    if (mode === "include") {
-      setInc((a) => (a.includes(v) ? a : [...a, v]));
-      setExc((a) => a.filter((x) => x !== v));
-    } else {
-      setExc((a) => (a.includes(v) ? a : [...a, v]));
-      setInc((a) => a.filter((x) => x !== v));
-    }
-    setQuery("");
+  const cur = mode === "include" ? inc : exc;
+  const setCur = mode === "include" ? setInc : setExc;
+  const setOther = mode === "include" ? setExc : setInc;
+  const toggleOne = (o: string) => {
+    if (cur.includes(o)) setCur((a) => a.filter((x) => x !== o));
+    else { setCur((a) => [...a, o]); setOther((a) => a.filter((x) => x !== o)); }
+  };
+  const selectAll = (shown: string[], allSel: boolean) => {
+    if (allSel) setCur((a) => a.filter((o) => !shown.includes(o)));
+    else { setCur((a) => Array.from(new Set([...a, ...shown]))); setOther((a) => a.filter((o) => !shown.includes(o))); }
+  };
+  // Flipping the toggle re-buckets the existing chips (see OfficeSearchPopover.switchMode).
+  const switchMode = (m: "include" | "exclude") => {
+    setMode(m);
+    const uniq = (a: string[], b: string[]) => Array.from(new Set([...a, ...b]));
+    if (m === "exclude") { setExc((x) => uniq(x, inc)); setInc([]); }
+    else { setInc((x) => uniq(x, exc)); setExc([]); }
   };
 
   return (
@@ -561,17 +639,16 @@ export function NamePopover({ value, onChange }: { value: IncludeExclude; onChan
         setOpen(false);
       }}
     >
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-6">
-          {/* Radios set which bucket the NEXT pick goes into; existing chips stay put. */}
-          <RadioOpt label="Include" on={mode === "include"} onClick={() => setMode("include")} />
-          <RadioOpt label="Exclude" on={mode === "exclude"} onClick={() => setMode("exclude")} />
-        </div>
-        <span className="text-xs text-neutral-400">{inc.length + exc.length} selected</span>
+      <div className="flex items-center gap-6">
+        {/* Flipping the toggle moves existing chips to that bucket (and steers new picks). */}
+        <RadioOpt label="Include" on={mode === "include"} onClick={() => switchMode("include")} />
+        <RadioOpt label="Exclude" on={mode === "exclude"} onClick={() => switchMode("exclude")} />
       </div>
       <div className="mt-2">
-        <SearchBox placeholder="Search by name" query={query} setQuery={setQuery} options={options.filter((o) => !taken.includes(o))} onPick={pick} />
+        <SearchInput placeholder="Search by name" value={query} onChange={setQuery} />
       </div>
+      <CountRow selected={inc.length + exc.length} total={Math.max(total, inc.length + exc.length)} onClear={() => { setInc([]); setExc([]); }} />
+      <CheckList options={options} isSelected={(o) => cur.includes(o)} onToggle={toggleOne} onSelectAll={selectAll} />
       <Chips items={inc} onRemove={(v) => setInc(inc.filter((x) => x !== v))} />
       <Chips items={exc} tone="exclude" onRemove={(v) => setExc(exc.filter((x) => x !== v))} />
     </FilterPopoverShell>

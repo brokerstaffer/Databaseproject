@@ -96,7 +96,7 @@ export default function LoginPage() {
     <Card>
       <CardHeader className="text-center">
         <CardTitle className="text-2xl font-bold">
-          Broker Staffer
+          BrokerStaffer
         </CardTitle>
         <p className="text-sm text-muted-foreground">
           {resetMode ? "Reset your password" : "Sign in to your account"}

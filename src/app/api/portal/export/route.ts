@@ -94,7 +94,7 @@ export async function POST(req: NextRequest) {
           email: emailOf(r),
           phone: clean(r.preferred_phone, 40),
           brokerage: clean(r.office_name, 160) ?? clean(r.brand, 160),
-          notes: "Added from Broker Staffer DB",
+          notes: "Added by BrokerStaffer",
         }));
 
   const res = await fetch(`${portal.base}/${target === "agents" ? "agents" : "dnc"}/csv`, {

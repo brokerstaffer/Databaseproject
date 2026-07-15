@@ -86,7 +86,7 @@ function summarizeFilters(bf: BatchFilters | null): string {
   ie("Name", f.name);
   if (f.nameQuery) parts.push(`find “${f.nameQuery}”`);
   if (bf.mode === "office") parts.push("Office mode");
-  if (bf.source && bf.source !== "all") parts.push(bf.source === "courted" ? "Courted" : "Zillow/Realtor");
+  if (bf.source && bf.source !== "all") parts.push(bf.source === "courted" ? "MLS" : "Zillow/Realtor");
   if (bf.rangeFrom || bf.rangeTo) parts.push(`rows ${bf.rangeFrom ?? 1}–${bf.rangeTo ?? "end"}`);
   return parts.length ? parts.join(" · ") : "no filters (all agents)";
 }
@@ -150,7 +150,7 @@ export default function ExportPage() {
   }
 
   return (
-    <div className="mx-auto flex h-full max-w-6xl flex-col gap-4">
+    <div className="mx-auto flex max-w-6xl flex-col gap-4">
       <div>
         <h1 className="text-2xl font-bold tracking-tight text-neutral-900">Export</h1>
         <p className="mt-0.5 text-sm text-neutral-500">Campaign sends (enrich → EmailBison) and CSV downloads from Agent Search.</p>
@@ -270,7 +270,7 @@ export default function ExportPage() {
       </div>
 
       {/* CSV + legacy history */}
-      <div className="min-h-0 flex-1 overflow-hidden rounded-xl border border-neutral-200 bg-white shadow-sm">
+      <div className="overflow-hidden rounded-xl border border-neutral-200 bg-white shadow-sm">
         <div className="border-b border-neutral-100 px-4 py-3 text-sm font-semibold text-neutral-900">CSV downloads &amp; legacy Clay sends</div>
         <div className="overflow-auto">
           <table className="w-full text-sm">
