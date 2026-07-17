@@ -83,6 +83,39 @@ function StatCell({ a, field, fmt }: { a: Agent; field: string; fmt: (v: number 
   );
 }
 
+// Contact cell with the same per-source breakdown as the numeric StatCell: the preferred
+// value on top; when another source carries a DIFFERENT email/phone (normalized — case for
+// emails, digits + country code for phones), each source's value is listed underneath.
+const normEmailV = (s: string | null | undefined) => (s ?? "").trim().toLowerCase();
+const normPhoneV = (s: string | null | undefined) => {
+  const d = (s ?? "").replace(/\D/g, "");
+  return d.length === 11 && d.startsWith("1") ? d.slice(1) : d;
+};
+function ContactCell({ a, field }: { a: Agent; field: "email" | "phone" }) {
+  const preferred = (field === "email" ? a.preferred_email : a.preferred_phone) as string | null;
+  const ids = (a.source_ids ?? {}) as Record<string, { email?: string | null; phone?: string | null } | undefined>;
+  const norm = field === "email" ? normEmailV : normPhoneV;
+  const entries = (["courted", "zillow", "realtor"] as const)
+    .map((s) => ({ source: s, value: ids[s]?.[field] ?? null }))
+    .filter((e) => e.value);
+  const uniq = new Set([preferred, ...entries.map((e) => e.value)].filter(Boolean).map((v) => norm(v)));
+  const breakdown = uniq.size > 1 ? entries : [];
+  return (
+    <div>
+      <div>{field === "phone" ? phoneFmt(preferred) : na(preferred)}</div>
+      {breakdown.length > 0 && (
+        <div className="mt-0.5 space-y-0.5">
+          {breakdown.map((e) => (
+            <div key={e.source} className="text-[11px] capitalize text-neutral-400">
+              {e.source}: {e.value}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 interface Col {
   key: string;
   label: string;
@@ -126,8 +159,8 @@ const COLUMNS: Col[] = [
   { key: "listN", label: "List-side (#)", sortBy: "list_side_count", align: "right", render: (a) => <StatCell a={a} field="list_side_count" fmt={numv} /> },
   { key: "rentals", label: "Closed rentals", sortBy: "closed_rentals", align: "right", render: (a) => <StatCell a={a} field="closed_rentals" fmt={numv} /> },
   { key: "avgRent", label: "Avg. rental price", sortBy: "avg_rental_price", align: "right", render: (a) => <StatCell a={a} field="avg_rental_price" fmt={usd} /> },
-  { key: "email", label: "Preferred email address", sortBy: "preferred_email", render: (a) => na(a.preferred_email) },
-  { key: "phone", label: "Preferred phone number", sortBy: "preferred_phone", render: (a) => phoneFmt(a.preferred_phone) },
+  { key: "email", label: "Preferred email address", sortBy: "preferred_email", render: (a) => <ContactCell a={a} field="email" /> },
+  { key: "phone", label: "Preferred phone number", sortBy: "preferred_phone", render: (a) => <ContactCell a={a} field="phone" /> },
   // Zillow/Realtor-only fields (all-time stats + extras — separate from the LTM metrics)
   { key: "linkedin", label: "LinkedIn", sortBy: "linkedin_url", defaultDir: "asc", render: (a) => {
       if (!a.linkedin_url) return <span className="text-neutral-400">N/A</span>;
