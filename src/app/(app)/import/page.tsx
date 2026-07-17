@@ -1,8 +1,15 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { Database, Webhook } from "lucide-react";
+import { Database, FileUp, Webhook } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+import { toast } from "sonner";
+import { CSVDropzone } from "@/components/uploads/csv-dropzone";
+import { FieldMapper } from "@/components/uploads/field-mapper";
+import { parseCSVAllRows, type ParseResult } from "@/lib/uploads/parse-csv";
+import type { FieldMapping } from "@/lib/uploads/normalize-row";
 
 interface Row {
   id: string;
@@ -15,13 +22,30 @@ interface Counts {
   offices: number;
   mls: number;
 }
+interface ImportTotals {
+  inserted: number;
+  updated: number;
+  offices: number;
+  mls: number;
+}
 const fmt = (s: string | null) => (s ? new Date(s).toLocaleString() : "—");
+const CHUNK = 1000;
 
 export default function ImportPage() {
   const [rows, setRows] = useState<Row[]>([]);
   const [counts, setCounts] = useState<Counts | null>(null);
 
-  useEffect(() => {
+  // CSV flow: idle -> map -> confirm -> running -> done
+  const [step, setStep] = useState<"idle" | "map" | "confirm" | "running" | "done">("idle");
+  const [file, setFile] = useState<File | null>(null);
+  const [parsed, setParsed] = useState<ParseResult | null>(null);
+  const [mapping, setMapping] = useState<FieldMapping>({});
+  const [source, setSource] = useState<"courted" | "zillow" | "realtor">("courted");
+  const [progress, setProgress] = useState({ sent: 0, total: 0 });
+  const [totals, setTotals] = useState<ImportTotals | null>(null);
+  const [skippedEmpty, setSkippedEmpty] = useState(0);
+
+  const loadHistory = useCallback(() => {
     fetch("/api/import/history")
       .then((r) => r.json())
       .then((j) => {
@@ -29,12 +53,73 @@ export default function ImportPage() {
         setCounts(j.counts ?? null);
       });
   }, []);
+  useEffect(loadHistory, [loadHistory]);
+
+  function resetFlow() {
+    setStep("idle");
+    setFile(null);
+    setParsed(null);
+    setMapping({});
+    setTotals(null);
+    setSkippedEmpty(0);
+    setProgress({ sent: 0, total: 0 });
+  }
+
+  async function runImport() {
+    if (!file) return;
+    setStep("running");
+    try {
+      const { rows: allRows } = await parseCSVAllRows(file);
+      // apply the column mapping -> objects keyed by the ingest column names
+      const mapped: Record<string, string>[] = [];
+      let empty = 0;
+      for (const raw of allRows) {
+        const obj: Record<string, string> = {};
+        for (const [idxStr, key] of Object.entries(mapping)) {
+          const v = raw[Number(idxStr)]?.trim();
+          if (v) obj[key] = v;
+        }
+        if (Object.keys(obj).length === 0) empty++;
+        else mapped.push(obj);
+      }
+      setSkippedEmpty(empty);
+      setProgress({ sent: 0, total: mapped.length });
+
+      const agg: ImportTotals = { inserted: 0, updated: 0, offices: 0, mls: 0 };
+      const chunks = Math.ceil(mapped.length / CHUNK);
+      for (let i = 0; i < chunks; i++) {
+        const slice = mapped.slice(i * CHUNK, (i + 1) * CHUNK);
+        const res = await fetch("/api/import/csv", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ source, rows: slice, fileName: file.name, chunk: i + 1, chunks }),
+        });
+        const j = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(j.error ?? `chunk ${i + 1}/${chunks} failed (HTTP ${res.status})`);
+        agg.inserted += j.inserted ?? 0;
+        agg.updated += j.updated ?? 0;
+        agg.offices += j.offices ?? 0;
+        agg.mls += j.mls ?? 0;
+        setProgress({ sent: Math.min((i + 1) * CHUNK, mapped.length), total: mapped.length });
+      }
+      setTotals(agg);
+      setStep("done");
+      loadHistory();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Import failed", { duration: 8000 });
+      setStep("confirm"); // keep the mapping so a transient failure can be retried
+    }
+  }
+
+  const mappedCount = Object.keys(mapping).length;
 
   return (
-    <div className="mx-auto flex h-full max-w-5xl flex-col gap-4">
+    <div className="mx-auto flex h-full max-w-5xl flex-col gap-4 overflow-y-auto">
       <div>
         <h1 className="text-2xl font-bold tracking-tight text-neutral-900">Import</h1>
-        <p className="mt-0.5 text-sm text-neutral-500">Agent data flows in from the scraper via the ingest webhook.</p>
+        <p className="mt-0.5 text-sm text-neutral-500">
+          Agent data flows in from the scraper via the ingest webhook — or upload a CSV here.
+        </p>
       </div>
 
       {/* totals */}
@@ -49,6 +134,109 @@ export default function ImportPage() {
             <div className="text-sm text-neutral-500">{c.label}</div>
           </div>
         ))}
+      </div>
+
+      {/* CSV import */}
+      <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
+        <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-neutral-900">
+          <FileUp className="h-4 w-4 text-neutral-400" />
+          Import from CSV
+          {step !== "idle" && (
+            <button type="button" className="ml-auto text-xs font-normal text-neutral-500 hover:underline" onClick={resetFlow}>
+              Start over
+            </button>
+          )}
+        </div>
+
+        {step === "idle" && (
+          <CSVDropzone
+            onFilesParsed={(result, files) => {
+              setParsed(result);
+              setFile(files[0]);
+              setStep("map");
+            }}
+            onError={(m) => toast.error(m)}
+          />
+        )}
+
+        {step === "map" && parsed && (
+          <FieldMapper
+            headers={parsed.headers}
+            preview={parsed.preview}
+            onBack={resetFlow}
+            onConfirm={(m) => {
+              setMapping(m);
+              setStep("confirm");
+            }}
+          />
+        )}
+
+        {step === "confirm" && parsed && file && (
+          <div className="space-y-4">
+            <p className="text-sm text-neutral-700">
+              <span className="font-medium">{file.name}</span> — {parsed.totalRows.toLocaleString()} rows, {mappedCount} columns
+              mapped.
+            </p>
+            <div>
+              <label className="text-sm font-medium text-neutral-700">Import as source</label>
+              <div className="mt-1.5 grid max-w-md grid-cols-3 gap-2">
+                {([["courted", "MLS / Courted"], ["zillow", "Zillow"], ["realtor", "Realtor"]] as const).map(([s, lbl]) => (
+                  <button
+                    key={s}
+                    type="button"
+                    onClick={() => setSource(s)}
+                    className={cn(
+                      "rounded-lg border px-3 py-2 text-sm font-medium transition-colors",
+                      source === s ? "border-neutral-900 bg-neutral-900 text-white" : "border-neutral-300 text-neutral-700 hover:bg-neutral-50"
+                    )}
+                  >
+                    {lbl}
+                  </button>
+                ))}
+              </div>
+              <p className="mt-1 text-xs text-neutral-500">
+                Which source these rows count as — drives per-source stats, the All/Zillow/Realtor toggle, and merge
+                priority. Rows are matched against existing agents by license → email → phone, so re-importing updates
+                instead of duplicating.
+              </p>
+            </div>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => setStep("map")}>
+                Back
+              </Button>
+              <Button onClick={runImport}>Import {parsed.totalRows.toLocaleString()} rows</Button>
+            </div>
+          </div>
+        )}
+
+        {step === "running" && (
+          <div className="space-y-2">
+            <p className="text-sm text-neutral-700">
+              Importing… {progress.sent.toLocaleString()} / {progress.total.toLocaleString()} rows
+            </p>
+            <div className="h-2 w-full overflow-hidden rounded-full bg-neutral-100">
+              <div
+                className="h-full rounded-full bg-neutral-900 transition-all"
+                style={{ width: progress.total ? `${Math.round((progress.sent / progress.total) * 100)}%` : "0%" }}
+              />
+            </div>
+          </div>
+        )}
+
+        {step === "done" && totals && (
+          <div className="space-y-3">
+            <p className="text-sm text-neutral-800">
+              Done — <span className="font-medium">{totals.inserted.toLocaleString()} new agents</span>,{" "}
+              <span className="font-medium">{totals.updated.toLocaleString()} updated</span>
+              {totals.offices > 0 && <>, {totals.offices.toLocaleString()} offices touched</>}
+              {totals.mls > 0 && <>, {totals.mls.toLocaleString()} MLS links</>}
+              {skippedEmpty > 0 && <span className="text-neutral-500"> ({skippedEmpty} empty rows skipped)</span>}.
+            </p>
+            <Button variant="outline" onClick={resetFlow}>
+              Import another file
+            </Button>
+          </div>
+        )}
       </div>
 
       {/* webhook pointer */}
@@ -77,7 +265,7 @@ export default function ImportPage() {
                 <tr>
                   <td colSpan={3} className="px-4 py-10 text-center text-neutral-400">
                     <Database className="mx-auto mb-2 h-6 w-6 text-neutral-300" />
-                    No imports yet. Point the scraper at the ingest webhook to load data.
+                    No imports yet. Point the scraper at the ingest webhook or upload a CSV above.
                   </td>
                 </tr>
               ) : (

@@ -17,7 +17,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { LEAD_FIELDS, autoMatchField } from "@/lib/uploads/constants";
+import { AGENT_FIELDS, autoMatchAgentField } from "@/lib/uploads/agent-fields";
 import type { FieldMapping } from "@/lib/uploads/normalize-row";
 
 interface FieldMapperProps {
@@ -29,19 +29,14 @@ interface FieldMapperProps {
 
 const SKIP_VALUE = "__skip__";
 
-export function FieldMapper({
-  headers,
-  preview,
-  onConfirm,
-  onBack,
-}: FieldMapperProps) {
+export function FieldMapper({ headers, preview, onConfirm, onBack }: FieldMapperProps) {
   const [mapping, setMapping] = useState<Record<number, string>>({});
 
   // Auto-match on mount
   useEffect(() => {
     const auto: Record<number, string> = {};
     headers.forEach((header, idx) => {
-      const match = autoMatchField(header);
+      const match = autoMatchAgentField(header);
       if (match) auto[idx] = match;
     });
     setMapping(auto);
@@ -50,46 +45,42 @@ export function FieldMapper({
   function setField(index: number, value: string) {
     setMapping((prev) => {
       const next = { ...prev };
-      if (value === SKIP_VALUE) {
-        delete next[index];
-      } else {
-        next[index] = value;
-      }
+      if (value === SKIP_VALUE) delete next[index];
+      else next[index] = value;
       return next;
     });
   }
 
-  const hasEmail = Object.values(mapping).includes("email");
-  const usedFields = new Set(Object.values(mapping));
+  const used = new Set(Object.values(mapping));
+  // A name is required (agents are unusable without one); an identity field is strongly
+  // recommended — without license/email/phone the match waterfall falls back to
+  // name + office zip (low confidence), which can mis-merge same-named agents.
+  const hasName = used.has("Name") || (used.has("First Name") && used.has("Last Name"));
+  const hasIdentity = used.has("State License") || used.has("Email") || used.has("Phone") || used.has("Mobile Phone");
 
   function handleConfirm() {
     const filtered: FieldMapping = {};
-    for (const [idx, field] of Object.entries(mapping)) {
-      filtered[Number(idx)] = field;
-    }
+    for (const [idx, field] of Object.entries(mapping)) filtered[Number(idx)] = field;
     onConfirm(filtered);
   }
 
   return (
     <div className="space-y-4">
-      <div className="rounded-md border overflow-auto max-h-[60vh]">
+      <div className="max-h-[55vh] overflow-auto rounded-md border">
         <Table>
           <TableHeader>
             <TableRow>
               <TableHead className="w-[200px]">CSV Column</TableHead>
-              <TableHead className="w-[220px]">Map To</TableHead>
+              <TableHead className="w-[240px]">Map To</TableHead>
               <TableHead>Preview</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {headers.map((header, idx) => (
               <TableRow key={idx}>
-                <TableCell className="font-medium text-xs">{header}</TableCell>
+                <TableCell className="text-xs font-medium">{header}</TableCell>
                 <TableCell>
-                  <Select
-                    value={mapping[idx] ?? SKIP_VALUE}
-                    onValueChange={(v) => setField(idx, v)}
-                  >
+                  <Select value={mapping[idx] ?? SKIP_VALUE} onValueChange={(v) => setField(idx, v)}>
                     <SelectTrigger className="h-8 text-xs">
                       <SelectValue placeholder="Skip" />
                     </SelectTrigger>
@@ -97,15 +88,12 @@ export function FieldMapper({
                       <SelectItem value={SKIP_VALUE} className="text-xs">
                         — Skip —
                       </SelectItem>
-                      {LEAD_FIELDS.map((field) => (
+                      {AGENT_FIELDS.map((field) => (
                         <SelectItem
                           key={field.key}
                           value={field.key}
                           className="text-xs"
-                          disabled={
-                            usedFields.has(field.key) &&
-                            mapping[idx] !== field.key
-                          }
+                          disabled={used.has(field.key) && mapping[idx] !== field.key}
                         >
                           {field.label}
                         </SelectItem>
@@ -113,7 +101,7 @@ export function FieldMapper({
                     </SelectContent>
                   </Select>
                 </TableCell>
-                <TableCell className="text-xs text-muted-foreground truncate max-w-[300px]">
+                <TableCell className="max-w-[300px] truncate text-xs text-muted-foreground">
                   {preview
                     .slice(0, 3)
                     .map((row) => row[idx] ?? "")
@@ -125,9 +113,13 @@ export function FieldMapper({
         </Table>
       </div>
 
-      {!hasEmail && (
-        <p className="text-xs text-destructive">
-          Email column must be mapped — it is required for deduplication.
+      {!hasName && (
+        <p className="text-xs text-red-600">Map a Full name column (or First name + Last name) — agents need a name.</p>
+      )}
+      {hasName && !hasIdentity && (
+        <p className="text-xs text-amber-600">
+          No License / Email / Phone mapped — rows will match existing agents by name + office zip only (low
+          confidence). Mapping a license number gives the most reliable dedup.
         </p>
       )}
 
@@ -135,7 +127,7 @@ export function FieldMapper({
         <Button variant="outline" onClick={onBack}>
           Back
         </Button>
-        <Button onClick={handleConfirm} disabled={!hasEmail}>
+        <Button onClick={handleConfirm} disabled={!hasName}>
           Continue
         </Button>
       </div>
