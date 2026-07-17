@@ -389,8 +389,9 @@ export function ClientPopover({
       setSel(value);
       setMode(clientMode);
       if (clients === null) {
-        // only clients whose leads are up for review (orchestrator sets leads_inreview)
-        fetch("/api/orch/clients?inReview=1")
+        // ALL clients (existing + imported) — each shows its lead count; picking one filters
+        // to the agents on that client's lead list (orch_client_leads).
+        fetch("/api/orch/clients")
           .then((r) => r.json())
           .then((j) => setClients(j.clients ?? []))
           .catch(() => setClients([]));

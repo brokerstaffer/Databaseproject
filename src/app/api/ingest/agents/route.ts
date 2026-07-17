@@ -36,7 +36,7 @@ export async function POST(req: NextRequest) {
 
   const client = await getPool().connect();
   try {
-    const result = await upsertAgentRows(client, rows, source);
+    const { agentIds: _ids, ...result } = await upsertAgentRows(client, rows, source);
     await logAudit({ action: "ingest", performedBy: "scraper", details: `${source}: received ${rows.length} — ${JSON.stringify(result)}` });
     return NextResponse.json({ ok: true, source, received: rows.length, ...result });
   } catch (e) {

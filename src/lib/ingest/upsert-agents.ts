@@ -204,6 +204,9 @@ export interface IngestResult {
   updated: number;
   offices: number;
   mls: number;
+  // every agent id this batch touched (inserted + updated) — callers that link agents to a
+  // client (CSV import with a client selected) need them; API responses strip this field.
+  agentIds: string[];
 }
 
 interface Prepared {
@@ -228,7 +231,7 @@ interface Prepared {
 }
 
 export async function upsertAgentRows(client: PoolClient, rows: Row[], source: string): Promise<IngestResult> {
-  const stats: IngestResult = { inserted: 0, updated: 0, offices: 0, mls: 0 };
+  const stats: IngestResult = { inserted: 0, updated: 0, offices: 0, mls: 0, agentIds: [] };
   if (!rows.length) return stats;
 
   // ---- 1) prepare every row in JS (pure, no DB) ----
@@ -446,6 +449,7 @@ export async function upsertAgentRows(client: PoolClient, rows: Row[], source: s
     const updateRows = [...finalById.entries()].filter(([id]) => !isNew.get(id)).map(([id, p]) => toAgentObj(id, p));
     stats.inserted = insertRows.length;
     stats.updated = updateRows.length;
+    stats.agentIds = [...finalById.keys()];
 
     // offices an updated agent may be LEAVING (so their agent_count gets recomputed too)
     const recount = new Set<string>(officeIdByKey.values());

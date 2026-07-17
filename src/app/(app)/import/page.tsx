@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { Database, FileUp, Webhook } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { CSVDropzone } from "@/components/uploads/csv-dropzone";
@@ -41,8 +42,11 @@ export default function ImportPage() {
   const [parsed, setParsed] = useState<ParseResult | null>(null);
   const [mapping, setMapping] = useState<FieldMapping>({});
   const [source, setSource] = useState<"courted" | "zillow" | "realtor">("courted");
+  const [clients, setClients] = useState<{ id: string; client_name: string | null }[]>([]);
+  const [clientId, setClientId] = useState("");
   const [progress, setProgress] = useState({ sent: 0, total: 0 });
   const [totals, setTotals] = useState<ImportTotals | null>(null);
+  const [linkedTotal, setLinkedTotal] = useState(0);
   const [skippedEmpty, setSkippedEmpty] = useState(0);
 
   const loadHistory = useCallback(() => {
@@ -55,12 +59,22 @@ export default function ImportPage() {
   }, []);
   useEffect(loadHistory, [loadHistory]);
 
+  // clients for the optional "add to a client's lead list" picker
+  useEffect(() => {
+    fetch("/api/orch/clients")
+      .then((r) => r.json())
+      .then((j) => setClients(j.clients ?? []))
+      .catch(() => setClients([]));
+  }, []);
+
   function resetFlow() {
     setStep("idle");
     setFile(null);
     setParsed(null);
     setMapping({});
     setTotals(null);
+    setLinkedTotal(0);
+    setClientId("");
     setSkippedEmpty(0);
     setProgress({ sent: 0, total: 0 });
   }
@@ -86,13 +100,14 @@ export default function ImportPage() {
       setProgress({ sent: 0, total: mapped.length });
 
       const agg: ImportTotals = { inserted: 0, updated: 0, offices: 0, mls: 0 };
+      let linked = 0;
       const chunks = Math.ceil(mapped.length / CHUNK);
       for (let i = 0; i < chunks; i++) {
         const slice = mapped.slice(i * CHUNK, (i + 1) * CHUNK);
         const res = await fetch("/api/import/csv", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ source, rows: slice, fileName: file.name, chunk: i + 1, chunks }),
+          body: JSON.stringify({ source, rows: slice, fileName: file.name, chunk: i + 1, chunks, orchClientId: clientId || undefined }),
         });
         const j = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(j.error ?? `chunk ${i + 1}/${chunks} failed (HTTP ${res.status})`);
@@ -100,8 +115,10 @@ export default function ImportPage() {
         agg.updated += j.updated ?? 0;
         agg.offices += j.offices ?? 0;
         agg.mls += j.mls ?? 0;
+        linked += j.linked ?? 0;
         setProgress({ sent: Math.min((i + 1) * CHUNK, mapped.length), total: mapped.length });
       }
+      setLinkedTotal(linked);
       setTotals(agg);
       setStep("done");
       loadHistory();
@@ -200,6 +217,30 @@ export default function ImportPage() {
                 instead of duplicating.
               </p>
             </div>
+            <div>
+              <label className="text-sm font-medium text-neutral-700">
+                Add to client&apos;s lead list <span className="font-normal text-neutral-400">(optional)</span>
+              </label>
+              <div className="mt-1.5 flex max-w-md items-center gap-2">
+                <Select value={clientId || "__none__"} onValueChange={(v) => setClientId(v === "__none__" ? "" : v)}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="No client" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">No client — just import</SelectItem>
+                    {clients.map((c) => (
+                      <SelectItem key={c.id} value={c.id}>
+                        {c.client_name ?? "Unnamed client"}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <p className="mt-1 text-xs text-neutral-500">
+                Every imported agent (new or already in the database) is also added to this client&apos;s lead list, so the
+                Client filter finds them.
+              </p>
+            </div>
             <div className="flex gap-2">
               <Button variant="outline" onClick={() => setStep("map")}>
                 Back
@@ -230,6 +271,7 @@ export default function ImportPage() {
               <span className="font-medium">{totals.updated.toLocaleString()} updated</span>
               {totals.offices > 0 && <>, {totals.offices.toLocaleString()} offices touched</>}
               {totals.mls > 0 && <>, {totals.mls.toLocaleString()} MLS links</>}
+              {linkedTotal > 0 && <>, {linkedTotal.toLocaleString()} added to the client&apos;s lead list</>}
               {skippedEmpty > 0 && <span className="text-neutral-500"> ({skippedEmpty} empty rows skipped)</span>}.
             </p>
             <Button variant="outline" onClick={resetFlow}>
