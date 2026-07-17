@@ -321,9 +321,16 @@ async function claim(fromStatus, toStatus, extraWhere = "") {
 }
 
 async function loadAgents(agentIds) {
+  // source_ids stores per-source values RAW; the city entries are normalized here (via the
+  // same fn_norm_city the canonical columns use) because the lead mapper's "top producing
+  // city" email variable prefers the stash over the normalized most_transacted_city column.
   const { rows } = await pool.query(
     `select a.*, (select m.code from agent_mls am join mls m on m.id = am.mls_id
                    where am.agent_id = a.id limit 1) as mls_code,
+            (select jsonb_object_agg(e.k, case when e.v ? 'city'
+                      then jsonb_set(e.v, '{city}', coalesce(to_jsonb(fn_norm_city(e.v->>'city')), 'null'::jsonb))
+                      else e.v end)
+               from jsonb_each(a.source_ids) e(k, v)) as source_ids,
             (select jsonb_object_agg(s.source, to_jsonb(s) - 'agent_id')
                from agent_source_stats s where s.agent_id = a.id) as stats_by_source
        from agents a where a.id = any($1::uuid[])`,
