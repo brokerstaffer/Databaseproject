@@ -57,6 +57,9 @@ function summarizeFilters(bf: BatchFilters | null): string {
   // Client filter: new multi-select shape (orchClientIds) or the legacy scalar (old batches).
   const clientIdCount = Array.isArray(f.orchClientIds) ? f.orchClientIds.length : f.orchClientId ? 1 : 0;
   if (clientIdCount > 0) parts.push(`Client filter (${f.orchClientMode === "exclude" ? "exclude " : ""}${clientIdCount})`);
+  if (f.contact?.email) parts.push(f.contact.email === "has" ? "Has email" : "No email");
+  if (f.contact?.phone) parts.push(f.contact.phone === "has" ? "Has phone" : "No phone");
+  if (f.multiMls) parts.push("Multi-MLS only");
   if (f.location?.values?.length) {
     const v = f.location.values;
     parts.push(`${f.location.field ?? "city"}: ${v.slice(0, 2).join(", ")}${v.length > 2 ? ` +${v.length - 2}` : ""}`);

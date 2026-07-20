@@ -59,6 +59,7 @@ export async function POST(req: NextRequest) {
       details: `CSV import${fileName ? ` "${fileName}"` : ""}${chunkInfo} — ${source}: received ${rows.length} — ${JSON.stringify(result)}${clientName ? ` — linked ${linked} to ${clientName}` : ""}`,
       meta: { kind: "csv_import", fileName, source, received: rows.length, orchClientId, linked, ...result },
     });
+    getPool().query("select fn_refresh_location_options(false)").catch(() => {}); // debounced dropdown refresh
     return NextResponse.json({ ok: true, source, received: rows.length, linked, client: clientName, ...result });
   } catch (e) {
     console.error("csv import error:", e);

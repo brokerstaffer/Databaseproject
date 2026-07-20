@@ -415,7 +415,15 @@ export function AllFiltersDrawer({
           <RangeSection title="Average time at office" count={rangeCount(draft.avgTimeAtOffice)} value={draft.avgTimeAtOffice} onChange={(v) => set("avgTimeAtOffice", v as RangeF)} buckets={YEAR_BUCKETS} suffix="yrs" />
         </div>
         <SheetFooter className="flex-row items-center justify-between border-t border-neutral-200">
-          <button type="button" onClick={() => setDraft(DEFAULT_FILTERS)} className="text-sm font-medium text-neutral-700 hover:text-neutral-900">
+          <button
+            type="button"
+            onClick={() => {
+              const cleared = { ...DEFAULT_FILTERS, nameQuery: draft.nameQuery };
+              setDraft(cleared);
+              onApply(cleared); // Clear applies immediately (A4)
+            }}
+            className="text-sm font-medium text-neutral-700 hover:text-neutral-900"
+          >
             Clear all
           </button>
           <Button onClick={() => { onApply(draft); onOpenChange(false); }}>Show results</Button>

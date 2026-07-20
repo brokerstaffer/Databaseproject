@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import type { Agent, SearchResponse, SortDir, SearchMode, DataSource } from "@/types/agent";
-import { RangePopover, TitlePopover, ClientPopover, ZillowRealtorPopover, MissingContactPopover } from "./agent-filters";
+import { RangePopover, TitlePopover, ClientPopover, ZillowRealtorPopover, ContactPopover } from "./agent-filters";
 import { LocationPopover, OfficeSearchPopover, MlsPopover, LicensePopover, NamePopover } from "./agent-typeahead-filters";
 import { ExportDialog } from "./export-dialog";
 import { SavedViews } from "./saved-views";
@@ -238,8 +238,8 @@ function highlightedColumns(f: Filters, mode: SearchMode): Set<string> {
   if (ie(f.mls)) s.add("mlsAff");
   if (ie(f.license)) s.add("license");
   if (ie(f.name)) s.add("agent");
-  if (f.missingContact.email) s.add("email");
-  if (f.missingContact.phone) s.add("phone");
+  if (f.contact.email) s.add("email");
+  if (f.contact.phone) s.add("phone");
   const z = f.zillowRealtor;
   if (z.languages.length > 0) s.add("languages");
   if (z.totalSales.min || z.totalSales.max) s.add("totalSalesAT");
@@ -475,11 +475,18 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
           <OfficeSearchPopover value={filters.officeSearch} onChange={(v) => setF("officeSearch", v)} />
           {mode === "agent" && (
             <>
-              <MlsPopover value={filters.mls} onChange={(v) => setF("mls", v)} />
+              <MlsPopover
+                value={filters.mls}
+                multiMls={filters.multiMls}
+                onChange={(v, multi) => {
+                  setFilters((f) => ({ ...f, mls: v, multiMls: multi }));
+                  setPage(1);
+                }}
+              />
               <TitlePopover value={filters.title} onChange={(v) => setF("title", v)} />
               <LicensePopover value={filters.license} onChange={(v) => setF("license", v)} />
               <NamePopover value={filters.name} onChange={(v) => setF("name", v)} />
-              <MissingContactPopover value={filters.missingContact} onChange={(v) => setF("missingContact", v)} />
+              <ContactPopover value={filters.contact} onChange={(v) => setF("contact", v)} />
             </>
           )}
           {mode === "office" && (

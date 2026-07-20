@@ -22,7 +22,8 @@ export function useTypeahead(type: string, field?: string) {
         const res = await fetch(`/api/search/options?${p.toString()}`);
         const json = await res.json();
         if (active) {
-          const opts = Array.isArray(json.options) ? (json.options as string[]) : [];
+          const raw = Array.isArray(json.options) ? (json.options as (string | { v: string })[]) : [];
+          const opts = raw.map((o) => (typeof o === "string" ? o : o.v));
           setOptions(opts);
           if (!query.trim()) setTotal(opts.length);
         }
@@ -36,6 +37,40 @@ export function useTypeahead(type: string, field?: string) {
     };
   }, [type, field, query]);
   return { query, setQuery, options, total };
+}
+
+export interface LocOpt {
+  v: string;   // display + filter value ("Miami, FL")
+  n: number;   // agents (or offices in office scope) matching
+  var: number; // how many raw spelling variants collapse into this option
+}
+// Location options: precomputed, agent-count ordered, with live match totals (C2).
+export function useLocationOptions(field: string, scope: "agent" | "office") {
+  const [query, setQuery] = useState("");
+  const [options, setOptions] = useState<LocOpt[]>([]);
+  const [total, setTotal] = useState(0);   // matching option groups
+  const [agents, setAgents] = useState(0); // agents (offices) covered by those groups
+  useEffect(() => {
+    let active = true;
+    const t = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/search/options?type=location&field=${field}&scope=${scope}&q=${encodeURIComponent(query)}`);
+        const json = await res.json();
+        if (active) {
+          setOptions(Array.isArray(json.options) ? (json.options as LocOpt[]) : []);
+          setTotal(json.total ?? 0);
+          setAgents(json.agents ?? 0);
+        }
+      } catch {
+        /* ignore */
+      }
+    }, 150);
+    return () => {
+      active = false;
+      clearTimeout(t);
+    };
+  }, [field, scope, query]);
+  return { query, setQuery, options, total, agents };
 }
 
 // Plain search input (no dropdown) — pairs with the always-visible CheckList below it.
@@ -210,7 +245,9 @@ export function LocationPopover({ value, onChange, officeMode = false }: { value
   const [field, setField] = useState<LocationField>(value.field);
   const [kinds, setKinds] = useState<LocationKind[]>(value.appliesTo);
   const [values, setValues] = useState<string[]>(value.values);
-  const { query, setQuery, options, total } = useTypeahead("location", field);
+  // Precomputed options: instant, ordered by agent count, "City, ST" display with variant
+  // counts and live totals (C2). Office view sees office locations only (A8).
+  const { query, setQuery, options, total, agents } = useLocationOptions(field, officeMode ? "office" : "agent");
 
   useEffect(() => {
     if (open) {
@@ -223,8 +260,7 @@ export function LocationPopover({ value, onChange, officeMode = false }: { value
 
   const label = LOCATION_FIELDS.find((f) => f[0] === field)?.[1] ?? "City";
   const toggleKind = (k: LocationKind) => setKinds((a) => (a.includes(k) ? a.filter((x) => x !== k) : [...a, k]));
-  // Hard 50-value cap — the same rule the All-filters drawer enforces on this filter; the two
-  // surfaces must agree or one creates a state the other refuses to edit.
+  // Hard 50-value cap — the same rule the All-filters drawer enforces on this filter.
   const LOCATION_CAP = 50;
   const toggleValue = (v: string) =>
     setValues((vs) => (vs.includes(v) ? vs.filter((x) => x !== v) : vs.length >= LOCATION_CAP ? vs : [...vs, v]));
@@ -233,11 +269,12 @@ export function LocationPopover({ value, onChange, officeMode = false }: { value
       const merged = [...vs];
       for (const o of options) {
         if (merged.length >= LOCATION_CAP) break;
-        if (!merged.includes(o)) merged.push(o);
+        if (!merged.includes(o.v)) merged.push(o.v);
       }
       return merged;
     });
 
+  const unit = officeMode ? "offices" : "agents";
   return (
     <FilterPopoverShell
       label="Location"
@@ -250,6 +287,7 @@ export function LocationPopover({ value, onChange, officeMode = false }: { value
         setKinds(["office", "home", "transacted"]);
         setValues([]);
         setQuery("");
+        onChange({ field: "city", appliesTo: ["office", "home", "transacted"], values: [] }); // Clear applies immediately (A4)
       }}
       onApply={() => {
         onChange({ field, appliesTo: kinds, values });
@@ -280,8 +318,55 @@ export function LocationPopover({ value, onChange, officeMode = false }: { value
           <SearchInput placeholder={`Search by ${label.toLowerCase()}`} value={query} onChange={setQuery} />
         </div>
       </div>
-      <CountRow selected={values.length} total={Math.max(total, values.length)} capped={total >= OPTIONS_CAP} onSelectAll={selectAllShown} onClear={() => setValues([])} />
-      <CheckList options={options} isSelected={(o) => values.includes(o)} onToggle={toggleValue} />
+      {/* live totals while typing (C2): matching option groups + covered agents */}
+      <div className="mt-2 flex items-center justify-between px-1 text-xs">
+        <span className="text-neutral-400">
+          {total.toLocaleString()} {total === 1 ? "match" : "matches"} · ≈{agents.toLocaleString()} {unit}
+          <span className="ml-2 text-neutral-300">|</span>
+          <span className="ml-2">{values.length} selected</span>
+        </span>
+        <div className="flex gap-3">
+          <button type="button" className="text-neutral-600 hover:underline" onClick={selectAllShown}>
+            Select all
+          </button>
+          <button
+            type="button"
+            className="text-neutral-600 hover:underline"
+            onClick={() => {
+              setValues([]);
+              onChange({ field, appliesTo: kinds, values: [] }); // Clear applies immediately (A4)
+            }}
+          >
+            Clear
+          </button>
+        </div>
+      </div>
+      <div className="mt-1 max-h-56 space-y-0.5 overflow-auto">
+        {options.length === 0 ? (
+          <div className="px-1 py-2 text-sm text-neutral-400">No results.</div>
+        ) : (
+          options.map((o) => {
+            // a legacy saved view may hold the bare form ("Towson") of this composite option
+            const bare = o.v.replace(/,\s*[A-Za-z]{2}$/, "");
+            const checked = values.includes(o.v) || values.includes(bare);
+            return (
+            <label key={o.v} className="flex items-center gap-2 rounded px-1 py-1.5 text-sm text-neutral-800 hover:bg-neutral-50">
+              <Checkbox
+                checked={checked}
+                onCheckedChange={() =>
+                  checked ? setValues((vs) => vs.filter((x) => x !== o.v && x !== bare)) : toggleValue(o.v)
+                }
+              />
+              <span className="min-w-0 flex-1 truncate">{o.v}</span>
+              <span className="shrink-0 text-xs text-neutral-400">
+                {o.n.toLocaleString()} {unit}
+                {field === "city" && o.var > 1 ? ` · ${o.var} variants` : ""}
+              </span>
+            </label>
+            );
+          })
+        )}
+      </div>
       <Chips items={values} onRemove={(v) => setValues(values.filter((x) => x !== v))} />
       {values.length >= LOCATION_CAP && (
         <p className="mt-1 px-1 text-[11px] text-amber-600">{LOCATION_CAP} locations max — remove some to add more.</p>
@@ -350,6 +435,7 @@ export function OfficeSearchPopover({ value, onChange }: { value: OfficeSearchFi
         setOInc([]);
         setOExc([]);
         setQuery("");
+        onChange({ brand: { include: [], exclude: [] }, office: { include: [], exclude: [] } }); // Clear applies immediately (A4)
       }}
       onApply={() => {
         onChange({ brand: { include: bInc, exclude: bExc }, office: { include: oInc, exclude: oExc } });
@@ -381,7 +467,7 @@ export function OfficeSearchPopover({ value, onChange }: { value: OfficeSearchFi
       <div className="mt-2">
         <SearchInput placeholder={`Search ${entity}`} value={query} onChange={setQuery} />
       </div>
-      <CountRow selected={totalSelected} total={Math.max(total, totalSelected)} capped={total >= OPTIONS_CAP} onSelectAll={selectAll} onClear={() => { setBInc([]); setBExc([]); setOInc([]); setOExc([]); }} />
+      <CountRow selected={totalSelected} total={Math.max(total, totalSelected)} capped={total >= OPTIONS_CAP} onSelectAll={selectAll} onClear={() => { setBInc([]); setBExc([]); setOInc([]); setOExc([]); onChange({ brand: { include: [], exclude: [] }, office: { include: [], exclude: [] } }); }} />
       <CheckList options={options} isSelected={(o) => cur.includes(o)} onToggle={toggleOne} />
       {(bInc.length > 0 || bExc.length > 0) && (
         <div className="mt-3">
@@ -408,16 +494,28 @@ interface MlsItem {
   name: string | null;
 }
 
-export function MlsPopover({ value, onChange }: { value: IncludeExclude; onChange: (v: IncludeExclude) => void }) {
+export function MlsPopover({
+  value,
+  multiMls,
+  onChange,
+}: {
+  value: IncludeExclude;
+  multiMls: boolean;
+  onChange: (v: IncludeExclude, multiMls: boolean) => void;
+}) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const [items, setItems] = useState<MlsItem[]>([]);
   const [sel, setSel] = useState<string[]>(value.include);
+  const [multi, setMulti] = useState(multiMls);
   const [clients, setClients] = useState<string[]>([]);
   const [total, setTotal] = useState(0); // total MLS available (from the unfiltered list)
 
   useEffect(() => {
-    if (open) setSel(value.include);
+    if (open) {
+      setSel(value.include);
+      setMulti(multiMls);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
@@ -471,16 +569,25 @@ export function MlsPopover({ value, onChange }: { value: IncludeExclude; onChang
   return (
     <FilterPopoverShell
       label="MLS"
-      count={value.include.length}
+      count={value.include.length + (multiMls ? 1 : 0)}
       open={open}
       onOpenChange={setOpen}
       width="w-[420px]"
-      onClear={() => setSel([])}
+      onClear={() => {
+        setSel([]);
+        setMulti(false);
+        onChange({ include: [], exclude: [] }, false); // Clear applies immediately (A4)
+      }}
       onApply={() => {
-        onChange({ include: sel, exclude: [] });
+        onChange({ include: sel, exclude: [] }, multi);
         setOpen(false);
       }}
     >
+      {/* A5: isolate agents affiliated with more than one MLS */}
+      <label className="mb-2 flex items-center gap-2 text-sm text-neutral-800">
+        <Checkbox checked={multi} onCheckedChange={() => setMulti(!multi)} />
+        Only agents in multiple MLSs
+      </label>
       <div className="relative">
         <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400" />
         <input
@@ -498,7 +605,14 @@ export function MlsPopover({ value, onChange }: { value: IncludeExclude; onChang
           <button type="button" className="text-neutral-600 hover:underline" onClick={() => setSel((s) => Array.from(new Set([...s, ...items.map((m) => m.id)])))}>
             Select all
           </button>
-          <button type="button" className="text-neutral-600 hover:underline" onClick={() => setSel([])}>
+          <button
+            type="button"
+            className="text-neutral-600 hover:underline"
+            onClick={() => {
+              setSel([]);
+              onChange({ include: [], exclude: [] }, multiMls); // header Clear drops codes only — commits the APPLIED multiMls, never the draft
+            }}
+          >
             Clear
           </button>
         </div>
@@ -566,6 +680,7 @@ export function LicensePopover({ value, onChange }: { value: IncludeExclude; onC
         setInc([]);
         setExc([]);
         setQuery("");
+        onChange({ include: [], exclude: [] }); // Clear applies immediately (A4)
       }}
       onApply={() => {
         onChange({ include: inc, exclude: exc });
@@ -580,7 +695,7 @@ export function LicensePopover({ value, onChange }: { value: IncludeExclude; onC
       <div className="mt-2">
         <SearchInput placeholder="Search license #" value={query} onChange={setQuery} />
       </div>
-      <CountRow selected={inc.length + exc.length} total={Math.max(total, inc.length + exc.length)} capped={total >= OPTIONS_CAP} onSelectAll={selectAll} onClear={() => { setInc([]); setExc([]); }} />
+      <CountRow selected={inc.length + exc.length} total={Math.max(total, inc.length + exc.length)} capped={total >= OPTIONS_CAP} onSelectAll={selectAll} onClear={() => { setInc([]); setExc([]); onChange({ include: [], exclude: [] }); }} />
       <CheckList options={options} isSelected={(o) => cur.includes(o)} onToggle={toggleOne} />
       <Chips items={inc} onRemove={(v) => setInc(inc.filter((x) => x !== v))} />
       <Chips items={exc} tone="exclude" onRemove={(v) => setExc(exc.filter((x) => x !== v))} />
@@ -627,6 +742,7 @@ export function NamePopover({ value, onChange }: { value: IncludeExclude; onChan
         setInc([]);
         setExc([]);
         setQuery("");
+        onChange({ include: [], exclude: [] }); // Clear applies immediately (A4)
       }}
       onApply={() => {
         onChange({ include: inc, exclude: exc });
@@ -641,7 +757,7 @@ export function NamePopover({ value, onChange }: { value: IncludeExclude; onChan
       <div className="mt-2">
         <SearchInput placeholder="Search by name" value={query} onChange={setQuery} />
       </div>
-      <CountRow selected={inc.length + exc.length} total={Math.max(total, inc.length + exc.length)} capped={total >= OPTIONS_CAP} onSelectAll={selectAll} onClear={() => { setInc([]); setExc([]); }} />
+      <CountRow selected={inc.length + exc.length} total={Math.max(total, inc.length + exc.length)} capped={total >= OPTIONS_CAP} onSelectAll={selectAll} onClear={() => { setInc([]); setExc([]); onChange({ include: [], exclude: [] }); }} />
       <CheckList options={options} isSelected={(o) => cur.includes(o)} onToggle={toggleOne} />
       <Chips items={inc} onRemove={(v) => setInc(inc.filter((x) => x !== v))} />
       <Chips items={exc} tone="exclude" onRemove={(v) => setExc(exc.filter((x) => x !== v))} />

@@ -59,7 +59,8 @@ export interface Filters {
   nameQuery: string; // free-text name search (top search bar)
   orchClientIds: string[]; // orchestrator clients (orch_clients.id) — [] = off; multi-select
   orchClientMode: "include" | "exclude"; // include those clients' leads, or exclude them
-  missingContact: { email: boolean; phone: boolean }; // agents MISSING the checked contact info
+  contact: { email: "" | "has" | "missing"; phone: "" | "has" | "missing" }; // has/missing per channel ("" = any)
+  multiMls: boolean; // only agents affiliated with 2+ MLSs
   agentCount: RangeF; // office mode: number of agents in the office
   zillowRealtor: ZillowRealtorFilter;
 }
@@ -82,7 +83,8 @@ export const DEFAULT_FILTERS: Filters = {
   nameQuery: "",
   orchClientIds: [],
   orchClientMode: "include",
-  missingContact: { email: false, phone: false },
+  contact: { email: "", phone: "" },
+  multiMls: false,
   agentCount: { buckets: [], min: "", max: "" },
   zillowRealtor: { languages: [], totalSales: { min: "", max: "" }, avgPriceAllTime: { min: "", max: "" }, avgVolumeAllTime: { min: "", max: "" }, hasLinkedin: false },
 };
@@ -130,17 +132,28 @@ export const officeSearchCount = (o: OfficeSearchFilter) => ieCount(o.brand) + i
 const mmCount = (m: MinMax) => (m.min ? 1 : 0) + (m.max ? 1 : 0);
 export const zillowRealtorCount = (z: ZillowRealtorFilter) =>
   z.languages.length + mmCount(z.totalSales) + mmCount(z.avgPriceAllTime) + mmCount(z.avgVolumeAllTime) + (z.hasLinkedin ? 1 : 0);
-export const missingContactCount = (m: { email: boolean; phone: boolean }) => (m.email ? 1 : 0) + (m.phone ? 1 : 0);
+export const contactCount = (c: { email: string; phone: string }) => (c.email ? 1 : 0) + (c.phone ? 1 : 0);
 
 // Merge a partial/legacy filters object onto the defaults. Older saved views stored a single
 // `orchClientId` (string) before the Client filter became multi-select — fold it into the
 // `orchClientIds` array so those views still apply their client. Newer keys fall back to defaults.
-export function normalizeFilters(f: Partial<Filters> & { orchClientId?: string }): Filters {
+export function normalizeFilters(
+  f: Partial<Filters> & { orchClientId?: string; missingContact?: { email: boolean; phone: boolean } }
+): Filters {
   const merged: Filters = { ...DEFAULT_FILTERS, ...(f as Filters) };
   if ((!merged.orchClientIds || merged.orchClientIds.length === 0) && typeof f.orchClientId === "string" && f.orchClientId) {
     merged.orchClientIds = [f.orchClientId];
   }
+  // legacy missingContact (pre-contact saved views) folds into the has/missing model
+  if (f.missingContact && (!f.contact || (!f.contact.email && !f.contact.phone))) {
+    merged.contact = {
+      email: f.missingContact.email ? "missing" : "",
+      phone: f.missingContact.phone ? "missing" : "",
+    };
+  }
+  if (!merged.contact) merged.contact = { email: "", phone: "" };
   delete (merged as Partial<Filters> & { orchClientId?: string }).orchClientId;
+  delete (merged as Partial<Filters> & { missingContact?: unknown }).missingContact;
   return merged;
 }
 
@@ -159,7 +172,7 @@ export function activeFilterCount(f: Filters, mode: "agent" | "office" = "agent"
   if (mode === "office") return shared + rangeCount(f.agentCount);
   return (
     shared +
-    f.mls.include.length + f.mls.exclude.length +
+    f.mls.include.length + f.mls.exclude.length + (f.multiMls ? 1 : 0) +
     ieCount(f.title) +
     ieCount(f.license) +
     rangeCount(f.closedTransactions) +
@@ -169,7 +182,7 @@ export function activeFilterCount(f: Filters, mode: "agent" | "office" = "agent"
     rangeCount(f.estTimeInOffice) +
     rangeCount(f.avgTimeAtOffice) +
     ieCount(f.name) +
-    missingContactCount(f.missingContact) +
+    contactCount(f.contact) +
     zillowRealtorCount(f.zillowRealtor)
   );
 }

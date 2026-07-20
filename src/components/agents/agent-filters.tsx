@@ -240,6 +240,7 @@ export function RangePopover({
         setSel([]);
         setMin("");
         setMax("");
+        onChange({ side: "all", buckets: [], min: "", max: "" }); // Clear applies immediately (A4)
       }}
       onApply={() => {
         onChange({ side, buckets: sel, min, max });
@@ -311,7 +312,12 @@ export function ZillowRealtorPopover({ value, onChange }: { value: ZillowRealtor
       open={open}
       onOpenChange={setOpen}
       width="w-96"
-      onClear={() => setDraft({ languages: [], totalSales: { min: "", max: "" }, avgPriceAllTime: { min: "", max: "" }, avgVolumeAllTime: { min: "", max: "" }, hasLinkedin: false })}
+      onClear={() => {
+        const empty = { languages: [], totalSales: { min: "", max: "" }, avgPriceAllTime: { min: "", max: "" }, avgVolumeAllTime: { min: "", max: "" }, hasLinkedin: false };
+        setDraft(empty);
+        setLangInput("");
+        onChange(empty); // Clear applies immediately (A4)
+      }}
       onApply={() => {
         // commit any language still sitting in the input (typed but Enter not pressed)
         const pending = langInput.trim();
@@ -383,6 +389,7 @@ export function ClientPopover({
   const [sel, setSel] = useState<string[]>(value);
   const [mode, setMode] = useState<"include" | "exclude">(clientMode);
   const [clients, setClients] = useState<OrchClient[] | null>(null);
+  const [q, setQ] = useState("");
 
   useEffect(() => {
     if (open) {
@@ -412,6 +419,7 @@ export function ClientPopover({
       onClear={() => {
         setSel([]);
         setMode("include");
+        onChange([], "include"); // Clear applies immediately (A4)
       }}
       onApply={() => {
         onChange(sel, mode);
@@ -424,14 +432,37 @@ export function ClientPopover({
         <Radio label="Include" on={mode === "include"} onClick={() => setMode("include")} />
         <Radio label="Exclude" on={mode === "exclude"} onClick={() => setMode("exclude")} />
       </div>
+      <input
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+        placeholder="Search clients"
+        className="mb-2 h-9 w-full rounded-lg border border-neutral-300 px-3 text-sm placeholder:text-neutral-400 focus:border-neutral-400 focus:outline-none"
+      />
       <div className="mb-1 flex items-center justify-between px-1 text-xs">
         <span className="text-neutral-400">{sel.length} out of {clients?.length ?? 0} selected</span>
         <div className="flex gap-3">
-          {/* no-op while the list is loading — otherwise this would wipe the seeded selection */}
-          <button type="button" className="text-neutral-600 hover:underline" onClick={() => clients?.length && setSel(clients.map((c) => c.id))}>
+          {/* no-op while the list is loading — otherwise this would wipe the seeded selection.
+              Select all covers only the clients the search box currently SHOWS. */}
+          <button
+            type="button"
+            className="text-neutral-600 hover:underline"
+            onClick={() => {
+              if (!clients?.length) return;
+              const shown = clients.filter((c) => !q.trim() || (c.client_name ?? "").toLowerCase().includes(q.trim().toLowerCase()));
+              setSel((s) => [...new Set([...s, ...shown.map((c) => c.id)])]);
+            }}
+          >
             Select all
           </button>
-          <button type="button" className="text-neutral-600 hover:underline" onClick={() => setSel([])}>
+          <button
+            type="button"
+            className="text-neutral-600 hover:underline"
+            onClick={() => {
+              setSel([]);
+              setMode("include");
+              onChange([], "include"); // Clear applies immediately (A4)
+            }}
+          >
             Clear
           </button>
         </div>
@@ -443,7 +474,7 @@ export function ClientPopover({
           <p className="py-4 text-center text-sm text-neutral-400">No clients yet.</p>
         ) : (
           <>
-            {clients.map((c) => {
+            {clients.filter((c) => !q.trim() || (c.client_name ?? "").toLowerCase().includes(q.trim().toLowerCase())).map((c) => {
               const on = sel.includes(c.id);
               return (
                 <button
@@ -468,14 +499,9 @@ export function ClientPopover({
   );
 }
 
-// ---------- Missing contact info (agents MISSING the checked contact fields) ----------
-export function MissingContactPopover({
-  value,
-  onChange,
-}: {
-  value: { email: boolean; phone: boolean };
-  onChange: (v: { email: boolean; phone: boolean }) => void;
-}) {
+// ---------- Contact (has / missing per channel — A3's include/exclude model) ----------
+export type ContactValue = { email: "" | "has" | "missing"; phone: "" | "has" | "missing" };
+export function ContactPopover({ value, onChange }: { value: ContactValue; onChange: (v: ContactValue) => void }) {
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState(value);
   useEffect(() => {
@@ -484,27 +510,35 @@ export function MissingContactPopover({
   }, [open]);
 
   const count = (value.email ? 1 : 0) + (value.phone ? 1 : 0);
+  const row = (k: "email" | "phone", label: string) => (
+    <div>
+      <div className="mb-1.5 text-xs font-medium text-neutral-500">{label}</div>
+      <div className="flex items-center gap-5">
+        {([["", "Any"], ["has", `Has ${k}`], ["missing", `No ${k}`]] as const).map(([v, lbl]) => (
+          <Radio key={v || "any"} label={lbl} on={draft[k] === v} onClick={() => setDraft({ ...draft, [k]: v })} />
+        ))}
+      </div>
+    </div>
+  );
   return (
     <FilterPopoverShell
-      label="Missing contact"
+      label="Contact"
       count={count}
       open={open}
       onOpenChange={setOpen}
-      width="w-72"
-      onClear={() => setDraft({ email: false, phone: false })}
+      width="w-80"
+      onClear={() => {
+        setDraft({ email: "", phone: "" });
+        onChange({ email: "", phone: "" }); // Clear applies immediately (A4)
+      }}
       onApply={() => {
         onChange(draft);
         setOpen(false);
       }}
     >
-      <p className="mb-2 text-xs text-neutral-500">Show agents missing the checked contact info (both = missing both).</p>
-      <div className="space-y-2">
-        {([["email", "No email address"], ["phone", "No phone number"]] as const).map(([k, lbl]) => (
-          <label key={k} className="flex items-center gap-2 text-sm text-neutral-800">
-            <Checkbox checked={draft[k]} onCheckedChange={() => setDraft({ ...draft, [k]: !draft[k] })} />
-            {lbl}
-          </label>
-        ))}
+      <div className="space-y-3.5">
+        {row("email", "Email address")}
+        {row("phone", "Phone number")}
       </div>
     </FilterPopoverShell>
   );
@@ -544,6 +578,7 @@ export function TitlePopover({ value, onChange }: { value: IncludeExclude; onCha
       onClear={() => {
         setInc([]);
         setExc([]);
+        onChange({ include: [], exclude: [] }); // Clear applies immediately (A4)
       }}
       onApply={() => {
         onChange({ include: inc, exclude: exc });

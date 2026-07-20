@@ -243,7 +243,10 @@ export async function upsertAgentRows(client: PoolClient, rows: Row[], source: s
     const officeState = txt(r["Office State"]);
     const officeZip = txt(r["Office Zip"]);
     const officeAddress = txt(r["Office Address"]);
-    const mlsCode = txt(r["MLS ID"]);
+    // A valid MLS code is a short identifier (CMLS, GAMLS…) — imports have leaked profile
+    // URLs and bare numbers into this column, which used to create junk mls rows.
+    const rawMlsCode = txt(r["MLS ID"]);
+    const mlsCode = rawMlsCode && /^[A-Za-z][A-Za-z0-9 &.\-]{1,19}$/.test(rawMlsCode) ? rawMlsCode : null;
     const fullName = txt(r["Name"]);
     const license = txt(r["State License"]);
     const email = lower(r["Email"]);

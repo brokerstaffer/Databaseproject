@@ -38,6 +38,7 @@ export async function POST(req: NextRequest) {
   try {
     const { agentIds: _ids, ...result } = await upsertAgentRows(client, rows, source);
     await logAudit({ action: "ingest", performedBy: "scraper", details: `${source}: received ${rows.length} — ${JSON.stringify(result)}` });
+    getPool().query("select fn_refresh_location_options(false)").catch(() => {}); // debounced dropdown refresh
     return NextResponse.json({ ok: true, source, received: rows.length, ...result });
   } catch (e) {
     console.error("ingest error:", e);
