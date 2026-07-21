@@ -269,7 +269,8 @@ export function LocationPopover({ value, onChange, officeMode = false }: { value
       const merged = [...vs];
       for (const o of options) {
         if (merged.length >= LOCATION_CAP) break;
-        if (!merged.includes(o.v)) merged.push(o.v);
+        const bare = o.v.replace(/,\s*[A-Za-z]{2}$/, "");
+        if (!merged.includes(o.v) && !merged.includes(bare)) merged.push(o.v);
       }
       return merged;
     });

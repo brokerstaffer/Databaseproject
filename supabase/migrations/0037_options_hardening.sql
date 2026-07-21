@@ -102,7 +102,10 @@ begin
          g.variants
     from grp g
     join keywide w on w.k = g.k
-    join disp d on d.k = g.k and d.st = g.st and d.rn = 1;
+    join disp d on d.k = g.k and d.st = g.st and d.rn = 1
+   -- a bare option is only offered when the city has NO stated entries — otherwise Select-all
+   -- would double-select every big city (bare + stated pair)
+   where g.st <> '' or not exists (select 1 from grp g2 where g2.k = g.k and g2.st <> '');
 
   -- agent-scope zip / county / state
   insert into location_options_stage (scope, field, key, state, value, agent_count)
@@ -159,7 +162,8 @@ begin
   )
   select 'office', 'city', g.k, g.st, d.base || case when g.st <> '' then ', ' || g.st else '' end,
          case when g.st = '' then w.n else g.n end, g.variants
-    from grp g join keywide w on w.k = g.k join disp d on d.k = g.k and d.st = g.st and d.rn = 1;
+    from grp g join keywide w on w.k = g.k join disp d on d.k = g.k and d.st = g.st and d.rn = 1
+   where g.st <> '' or not exists (select 1 from grp g2 where g2.k = g.k and g2.st <> '');
 
   insert into location_options_stage (scope, field, key, state, value, agent_count)
   with clean as (
