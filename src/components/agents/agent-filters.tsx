@@ -373,7 +373,9 @@ interface OrchClient {
   id: string;
   client_name: string | null;
   status: string | null;
-  lead_count: number;
+  lead_count: number;      // orchestrator/scraper list (new clients pre-send)
+  bison_leads: number;     // what's actually in the sequencer (source of truth once > 0)
+  bison_matched: number;   // of those, leads that exist in our DB (what the grid can show)
 }
 
 export function ClientPopover({
@@ -389,6 +391,7 @@ export function ClientPopover({
   const [sel, setSel] = useState<string[]>(value);
   const [mode, setMode] = useState<"include" | "exclude">(clientMode);
   const [clients, setClients] = useState<OrchClient[] | null>(null);
+  const [bisonTotal, setBisonTotal] = useState<{ total: number; matched: number } | null>(null);
   const [q, setQ] = useState("");
 
   useEffect(() => {
@@ -400,7 +403,10 @@ export function ClientPopover({
         // to the agents on that client's lead list (orch_client_leads).
         fetch("/api/orch/clients")
           .then((r) => r.json())
-          .then((j) => setClients(j.clients ?? []))
+          .then((j) => {
+            setClients(j.clients ?? []);
+            setBisonTotal(j.bison ?? null);
+          })
           .catch(() => setClients([]));
       }
     }
@@ -488,13 +494,24 @@ export function ClientPopover({
                 >
                   <Checkbox checked={on} onCheckedChange={() => toggle(c.id)} onClick={(e) => e.stopPropagation()} aria-label={c.client_name ?? "Unnamed client"} />
                   <span className="min-w-0 flex-1 truncate">{c.client_name ?? "Unnamed client"}</span>
-                  <span className="shrink-0 text-xs text-neutral-400">{c.lead_count.toLocaleString()} leads</span>
+                  {c.bison_leads > 0 ? (
+                    <span className="shrink-0 text-xs text-neutral-400" title={`${c.bison_leads.toLocaleString()} in Bison campaigns · ${c.bison_matched.toLocaleString()} in the database`}>
+                      {c.bison_leads.toLocaleString()} in Bison
+                    </span>
+                  ) : (
+                    <span className="shrink-0 text-xs text-neutral-400">{c.lead_count.toLocaleString()} leads</span>
+                  )}
                 </button>
               );
             })}
           </>
         )}
       </div>
+      {bisonTotal && bisonTotal.total > 0 && (
+        <p className="mt-2 border-t border-neutral-100 px-1 pt-2 text-xs text-neutral-500">
+          {bisonTotal.total.toLocaleString()} leads in Bison across all clients ({bisonTotal.matched.toLocaleString()} in the database)
+        </p>
+      )}
     </FilterPopoverShell>
   );
 }
