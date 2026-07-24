@@ -29,7 +29,7 @@ export async function POST(req: NextRequest) {
   // ---- gather AGENT rows (Office mode -> every agent in the chosen offices) ----
   let rows: Record<string, unknown>[] = [];
   try {
-    rows = await gatherExportRows({ mode, source, filters, selectedIds, rangeFrom, rangeTo });
+    rows = await gatherExportRows({ mode, source, filters, selectedIds, rangeFrom, rangeTo, userId: user?.id ?? null });
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "Failed to gather agents" }, { status: 500 });
   }

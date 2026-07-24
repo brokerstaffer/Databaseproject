@@ -28,7 +28,7 @@ export async function POST(req: NextRequest) {
 
   let rows: Row[] = [];
   try {
-    rows = (await gatherExportRows({ mode, source, filters, selectedIds, rangeFrom, rangeTo })) as Row[];
+    rows = (await gatherExportRows({ mode, source, filters, selectedIds, rangeFrom, rangeTo, userId: user?.id ?? null })) as Row[];
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "Failed to gather agents" }, { status: 500 });
   }

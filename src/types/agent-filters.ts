@@ -61,6 +61,7 @@ export interface Filters {
   orchClientMode: "include" | "exclude"; // include those clients' leads, or exclude them
   contact: { email: "" | "has" | "missing"; phone: "" | "has" | "missing" }; // has/missing per channel ("" = any)
   multiMls: boolean; // only agents affiliated with 2+ MLSs
+  savedViews: { include: string[]; exclude: string[] }; // saved_lists ids used as live include/exclude sets (A12)
   agentCount: RangeF; // office mode: number of agents in the office
   zillowRealtor: ZillowRealtorFilter;
 }
@@ -85,6 +86,7 @@ export const DEFAULT_FILTERS: Filters = {
   orchClientMode: "include",
   contact: { email: "", phone: "" },
   multiMls: false,
+  savedViews: { include: [], exclude: [] },
   agentCount: { buckets: [], min: "", max: "" },
   zillowRealtor: { languages: [], totalSales: { min: "", max: "" }, avgPriceAllTime: { min: "", max: "" }, avgVolumeAllTime: { min: "", max: "" }, hasLinkedin: false },
 };
@@ -152,6 +154,8 @@ export function normalizeFilters(
     };
   }
   if (!merged.contact) merged.contact = { email: "", phone: "" };
+  if (!merged.savedViews) merged.savedViews = { include: [], exclude: [] };
+  else merged.savedViews = { include: merged.savedViews.include ?? [], exclude: merged.savedViews.exclude ?? [] };
   delete (merged as Partial<Filters> & { orchClientId?: string }).orchClientId;
   delete (merged as Partial<Filters> & { missingContact?: unknown }).missingContact;
   return merged;
@@ -173,6 +177,7 @@ export function activeFilterCount(f: Filters, mode: "agent" | "office" = "agent"
   return (
     shared +
     f.mls.include.length + f.mls.exclude.length + (f.multiMls ? 1 : 0) +
+    f.savedViews.include.length + f.savedViews.exclude.length +
     ieCount(f.title) +
     ieCount(f.license) +
     rangeCount(f.closedTransactions) +

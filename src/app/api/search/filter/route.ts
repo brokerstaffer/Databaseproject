@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { createClient } from "@/lib/supabase/server";
+import { sanitizeSavedViews } from "@/lib/filters/sanitize-saved-views";
 
 // Agent/Office search. Calls fn_filter_search (SECURITY DEFINER) -> { data, totalCount, salesVolumeTotal }.
 export async function POST(req: NextRequest) {
@@ -18,11 +20,20 @@ export async function POST(req: NextRequest) {
     const limit = Math.min(Number(pageSize) || 50, 200);
     const offset = (Math.max(Number(page) || 1, 1) - 1) * limit;
 
+    // saved-view include/exclude references are permission-gated to the caller's own/shared
+    // views before they reach the SECURITY DEFINER RPC (only pays the auth cost when used).
+    let effFilters = filters;
+    if (filters && typeof filters === "object" && "savedViews" in filters) {
+      const supabase = await createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      effFilters = await sanitizeSavedViews(filters, user?.id ?? null);
+    }
+
     const admin = createAdminClient();
     const { data, error } = await admin.rpc("fn_filter_search", {
       p_mode: mode,
       p_source: source,
-      p_filters: filters,
+      p_filters: effFilters,
       p_sort_by: sortBy,
       p_sort_dir: sortDir,
       p_limit: limit,

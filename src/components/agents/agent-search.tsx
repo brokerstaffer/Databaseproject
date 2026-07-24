@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import type { Agent, SearchResponse, SortDir, SearchMode, DataSource } from "@/types/agent";
-import { RangePopover, TitlePopover, ClientPopover, ZillowRealtorPopover, ContactPopover } from "./agent-filters";
+import { RangePopover, TitlePopover, ClientPopover, ZillowRealtorPopover, ContactPopover, SavedViewsPopover } from "./agent-filters";
 import { LocationPopover, OfficeSearchPopover, MlsPopover, LicensePopover, NamePopover } from "./agent-typeahead-filters";
 import { ExportDialog } from "./export-dialog";
 import { SavedViews } from "./saved-views";
@@ -487,6 +487,7 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
               <LicensePopover value={filters.license} onChange={(v) => setF("license", v)} />
               <NamePopover value={filters.name} onChange={(v) => setF("name", v)} />
               <ContactPopover value={filters.contact} onChange={(v) => setF("contact", v)} />
+              <SavedViewsPopover value={filters.savedViews} onChange={(v) => setF("savedViews", v)} />
             </>
           )}
           {mode === "office" && (

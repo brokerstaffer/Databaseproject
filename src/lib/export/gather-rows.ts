@@ -1,4 +1,5 @@
 import { getPool } from "@/lib/db/pool";
+import { sanitizeSavedViews } from "@/lib/filters/sanitize-saved-views";
 
 // Shared row-gathering for both export paths (CSV + campaign send) so they can't drift.
 // The export always produces AGENT rows. In Office mode it expands the chosen offices into
@@ -12,6 +13,7 @@ type GatherArgs = {
   mode?: string;
   source?: string;
   filters?: Record<string, unknown>;
+  userId?: string | null; // gates saved-view include/exclude references (A12)
   selectedIds?: unknown;
   rangeFrom?: unknown;
   rangeTo?: unknown;
@@ -46,7 +48,8 @@ async function fetchAgentRowsByIds(rawIds: string[]): Promise<Record<string, unk
 }
 
 export async function gatherExportRows(args: GatherArgs): Promise<Record<string, unknown>[]> {
-  const { mode = "agent", source = "courted", filters = {}, selectedIds, rangeFrom, rangeTo } = args;
+  const { mode = "agent", source = "courted", selectedIds, rangeFrom, rangeTo, userId = null } = args;
+  const filters = await sanitizeSavedViews(args.filters ?? {}, userId);
   const from = Number(rangeFrom) > 0 ? Number(rangeFrom) : 1;
   const to = Number(rangeTo) > 0 ? Number(rangeTo) : null;
   if (to && to < from) return []; // inverted range -> empty, not a negative LIMIT error

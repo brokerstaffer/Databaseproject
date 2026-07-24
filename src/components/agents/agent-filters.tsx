@@ -623,3 +623,120 @@ export function TitlePopover({ value, onChange }: { value: IncludeExclude; onCha
     </FilterPopoverShell>
   );
 }
+
+// ---------- Saved views as include/exclude sets (A12) ----------
+interface SavedViewOpt {
+  id: string;
+  name: string;
+}
+export function SavedViewsPopover({
+  value,
+  onChange,
+}: {
+  value: { include: string[]; exclude: string[] };
+  onChange: (v: { include: string[]; exclude: string[] }) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [views, setViews] = useState<SavedViewOpt[] | null>(null);
+  const [inc, setInc] = useState<string[]>(value.include);
+  const [exc, setExc] = useState<string[]>(value.exclude);
+  const [q, setQ] = useState("");
+
+  useEffect(() => {
+    if (open) {
+      setInc(value.include);
+      setExc(value.exclude);
+      if (views === null) {
+        fetch("/api/lists")
+          .then((r) => r.json())
+          .then((j) => setViews(((j.lists ?? []) as { id: string; name: string }[]).map((l) => ({ id: l.id, name: l.name }))))
+          .catch(() => setViews([]));
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  const count = value.include.length + value.exclude.length;
+  const pick = (id: string, mode: "include" | "exclude") => {
+    if (mode === "include") {
+      setInc((a) => (a.includes(id) ? a.filter((x) => x !== id) : [...a, id]));
+      setExc((a) => a.filter((x) => x !== id));
+    } else {
+      setExc((a) => (a.includes(id) ? a.filter((x) => x !== id) : [...a, id]));
+      setInc((a) => a.filter((x) => x !== id));
+    }
+  };
+  const shown = (views ?? []).filter((v) => !q.trim() || v.name.toLowerCase().includes(q.trim().toLowerCase()));
+
+  return (
+    <FilterPopoverShell
+      label="Saved views"
+      count={count}
+      open={open}
+      onOpenChange={setOpen}
+      width="w-[400px]"
+      onClear={() => {
+        setInc([]);
+        setExc([]);
+        onChange({ include: [], exclude: [] }); // Clear applies immediately (A4)
+      }}
+      onApply={() => {
+        onChange({ include: inc, exclude: exc });
+        setOpen(false);
+      }}
+    >
+      <p className="mb-2 text-xs text-neutral-500">
+        Include = only agents in ANY of the chosen views; Exclude = hide agents in any of them. Evaluated
+        live, so it always reflects each view&apos;s current membership.
+      </p>
+      {views && views.length > 6 && (
+        <input
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="Search views"
+          className="mb-2 h-9 w-full rounded-lg border border-neutral-300 px-3 text-sm placeholder:text-neutral-400 focus:border-neutral-400 focus:outline-none"
+        />
+      )}
+      <div className="max-h-64 space-y-1 overflow-auto">
+        {views === null ? (
+          <p className="py-4 text-center text-sm text-neutral-400">Loading…</p>
+        ) : views.length === 0 ? (
+          <p className="py-4 text-center text-sm text-neutral-400">No saved views yet — save one from the disk icon first.</p>
+        ) : shown.length === 0 ? (
+          <p className="py-4 text-center text-sm text-neutral-400">No matches.</p>
+        ) : (
+          shown.map((v) => {
+            const on = inc.includes(v.id) ? "include" : exc.includes(v.id) ? "exclude" : "off";
+            return (
+              <div key={v.id} className="flex items-center gap-2 rounded-lg px-1 py-1">
+                <span className="min-w-0 flex-1 truncate text-sm text-neutral-800" title={v.name}>{v.name}</span>
+                <div className="flex shrink-0 gap-1">
+                  <button
+                    type="button"
+                    onClick={() => pick(v.id, "include")}
+                    className={cn(
+                      "rounded-md border px-2 py-1 text-xs font-medium transition-colors",
+                      on === "include" ? "border-brand bg-brand/10 text-brand" : "border-neutral-300 text-neutral-600 hover:bg-neutral-50"
+                    )}
+                  >
+                    Include
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => pick(v.id, "exclude")}
+                    className={cn(
+                      "rounded-md border px-2 py-1 text-xs font-medium transition-colors",
+                      on === "exclude" ? "border-red-300 bg-red-50 text-red-700" : "border-neutral-300 text-neutral-600 hover:bg-neutral-50"
+                    )}
+                  >
+                    Exclude
+                  </button>
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
+    </FilterPopoverShell>
+  );
+}
