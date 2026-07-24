@@ -131,7 +131,7 @@ export default function ImportPage() {
   const mappedCount = Object.keys(mapping).length;
 
   return (
-    <div className="mx-auto flex h-full max-w-5xl flex-col gap-4 overflow-y-auto">
+    <div className="mx-auto flex h-full max-w-5xl flex-col gap-4 overflow-y-auto pb-6">
       <div>
         <h1 className="text-2xl font-bold tracking-tight text-neutral-900">Import</h1>
         <p className="mt-0.5 text-sm text-neutral-500">
@@ -290,10 +290,10 @@ export default function ImportPage() {
         </div>
       </Link>
 
-      {/* recent imports */}
-      <div className="min-h-0 flex-1 overflow-hidden rounded-xl border border-neutral-200 bg-white shadow-sm">
+      {/* recent imports — sizes to its content so the whole page scrolls (no trapped flex-1 pane) */}
+      <div className="rounded-xl border border-neutral-200 bg-white shadow-sm">
         <div className="border-b border-neutral-100 px-4 py-3 text-sm font-semibold text-neutral-900">Recent imports</div>
-        <div className="overflow-auto">
+        <div className="max-h-[420px] overflow-auto">
           <table className="w-full text-sm">
             <thead className="bg-neutral-50 text-left text-xs font-medium text-neutral-500">
               <tr>

@@ -37,14 +37,14 @@ export function CSVDropzone({ onFilesParsed, onError }: CSVDropzoneProps) {
   return (
     <div
       {...getRootProps()}
-      className={`flex flex-col items-center justify-center gap-3 rounded-lg border-2 border-dashed p-12 cursor-pointer transition-colors ${
+      className={`flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed p-6 cursor-pointer transition-colors ${
         isDragActive
           ? "border-primary bg-primary/5"
           : "border-muted-foreground/25 hover:border-muted-foreground/50"
       }`}
     >
       <input {...getInputProps()} />
-      <Upload className="h-10 w-10 text-muted-foreground" />
+      <Upload className="h-7 w-7 text-muted-foreground" />
       <div className="text-center">
         <p className="text-sm font-medium">
           {isDragActive ? "Drop your CSVs here" : "Drag & drop one or more CSV files"}
