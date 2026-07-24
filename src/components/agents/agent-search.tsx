@@ -19,7 +19,6 @@ import { ExportDialog } from "./export-dialog";
 import { SavedViews } from "./saved-views";
 import { EditColumnsModal } from "./edit-columns";
 import { AllFiltersDrawer } from "./all-filters-drawer";
-import { OfficeProfile } from "./office-profile";
 import { DEFAULT_FILTERS, SALES_VOLUME_BUCKETS, COUNT_BUCKETS, YEAR_BUCKETS, GCI_BUCKETS, activeFilterCount, normalizeFilters } from "@/types/agent-filters";
 import type { Filters } from "@/types/agent-filters";
 import { useNameSearch } from "@/lib/stores/name-search";
@@ -212,7 +211,7 @@ function highlightedColumns(f: Filters, mode: SearchMode): Set<string> {
   const active = (r: { buckets: string[]; min: string; max: string }) => r.buckets.length > 0 || !!r.min || !!r.max;
   const ie = (x: { include: string[]; exclude: string[] }) => x.include.length > 0 || x.exclude.length > 0;
 
-  if (f.location.values.length > 0) {
+  if (f.location.values.length > 0 || f.location.excludeValues.length > 0) {
     const zip = f.location.field === "zip";
     if (mode === "office") {
       s.add(zip ? "officeZip" : "officeCity");
@@ -265,7 +264,6 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
   const [allFiltersOpen, setAllFiltersOpen] = useState(false);
   const [mode, setMode] = useState<SearchMode>("agent");
   const [source, setSource] = useState<DataSource>("all");
-  const [profileOfficeId, setProfileOfficeId] = useState<string | null>(null);
   const [colOrder, setColOrder] = useState<string[]>(DEFAULT_COL_ORDER);
   const [hiddenCols, setHiddenCols] = useState<Set<string>>(new Set());
 
@@ -311,6 +309,17 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
     // keep column layout + the top-bar find term; reset every actual filter
     setFilters((p) => ({ ...DEFAULT_FILTERS, nameQuery: p.nameQuery }));
     setPage(1);
+  }
+
+  // A13: clicking an office/brand name in Office view jumps to the agent Filter view with
+  // that office (or brand) applied as an Include filter — replaces the agent-list pop-up.
+  function jumpToAgents(kind: "office" | "brand", name: string) {
+    setFilters((f) => ({ ...f, officeSearch: { ...f.officeSearch, [kind]: { include: [name], exclude: [] } } }));
+    setMode("agent");
+    setPage(1);
+    setSelected(new Set());
+    setSortBy("sales_volume");
+    setSortDir("desc");
   }
 
   // Top-bar name search flows through a shared store (not the URL), so it narrows the CURRENT
@@ -617,18 +626,23 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
                   return (
                     <tr
                       key={a.id}
-                      className={`border-b border-neutral-100 hover:bg-neutral-50 ${mode === "office" ? "cursor-pointer" : ""}`}
-                      onClick={mode === "office" ? () => setProfileOfficeId(a.id) : undefined}
+                      className="border-b border-neutral-100 hover:bg-neutral-50"
                     >
                       <td className="w-10 px-4 py-3" onClick={(e) => e.stopPropagation()}>
                         <Checkbox checked={selected.has(a.id)} onCheckedChange={() => toggleOne(a.id)} aria-label="Select row" />
                       </td>
                       {activeColumns.map((col) => {
                         const cellHit = hit && col.key === "agent"; // light-green highlight on the matching name
+                        // A13: in Office view the office/brand cells jump to the agent grid
+                        // with that value applied as an Include filter.
+                        const jumpKind = mode === "office" && col.key === "office" ? "office" : mode === "office" && col.key === "brand" ? "brand" : null;
+                        const jumpValue = jumpKind === "office" ? a.office_name : jumpKind === "brand" ? a.brand : null;
                         return (
                           <td
                             key={col.key}
-                            className={`whitespace-nowrap px-4 py-3 text-neutral-700 ${col.align === "right" ? "text-right tabular-nums" : "text-left"} ${cellHit ? "bg-green-200/70" : highlightedCols.has(col.key) ? "bg-neutral-50" : ""}`}
+                            onClick={jumpKind && jumpValue ? () => jumpToAgents(jumpKind, String(jumpValue)) : undefined}
+                            title={jumpKind && jumpValue ? `Show agents in this ${jumpKind}` : undefined}
+                            className={`whitespace-nowrap px-4 py-3 text-neutral-700 ${col.align === "right" ? "text-right tabular-nums" : "text-left"} ${cellHit ? "bg-green-200/70" : highlightedCols.has(col.key) ? "bg-neutral-50" : ""} ${jumpKind && jumpValue ? "cursor-pointer hover:underline" : ""}`}
                           >
                             {col.render(a)}
                           </td>
@@ -703,7 +717,6 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
           setPage(1);
         }}
       />
-      <OfficeProfile officeId={profileOfficeId} onOpenChange={(o) => { if (!o) setProfileOfficeId(null); }} />
     </div>
   );
 }

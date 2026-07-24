@@ -11,7 +11,8 @@ export interface IncludeExclude {
 export interface LocationFilter {
   field: LocationField;
   appliesTo: LocationKind[];
-  values: string[];
+  values: string[];        // include
+  excludeValues: string[]; // exclude (A14) — agents matching any of these are hidden
 }
 export interface RangeSide {
   side: VolumeSide;
@@ -67,7 +68,7 @@ export interface Filters {
 }
 
 export const DEFAULT_FILTERS: Filters = {
-  location: { field: "city", appliesTo: ["office", "home", "transacted"], values: [] },
+  location: { field: "city", appliesTo: ["office", "home", "transacted"], values: [], excludeValues: [] },
   salesVolume: { side: "all", buckets: [], min: "", max: "" },
   closedUnits: { side: "all", buckets: [], min: "", max: "" },
   closedTransactions: { side: "all", buckets: [], min: "", max: "" },
@@ -155,6 +156,7 @@ export function normalizeFilters(
   }
   if (!merged.contact) merged.contact = { email: "", phone: "" };
   if (!merged.savedViews) merged.savedViews = { include: [], exclude: [] };
+  if (!merged.location.excludeValues) merged.location = { ...merged.location, excludeValues: [] };
   else merged.savedViews = { include: merged.savedViews.include ?? [], exclude: merged.savedViews.exclude ?? [] };
   delete (merged as Partial<Filters> & { orchClientId?: string }).orchClientId;
   delete (merged as Partial<Filters> & { missingContact?: unknown }).missingContact;
@@ -168,7 +170,7 @@ export function normalizeFilters(
 // and the client filter — everything else is agent-only.
 export function activeFilterCount(f: Filters, mode: "agent" | "office" = "agent"): number {
   const shared =
-    f.location.values.length +
+    f.location.values.length + f.location.excludeValues.length +
     rangeCount(f.salesVolume) +
     officeSearchCount(f.officeSearch) +
     rangeCount(f.closedUnits) +

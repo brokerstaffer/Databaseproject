@@ -245,6 +245,8 @@ export function LocationPopover({ value, onChange, officeMode = false }: { value
   const [field, setField] = useState<LocationField>(value.field);
   const [kinds, setKinds] = useState<LocationKind[]>(value.appliesTo);
   const [values, setValues] = useState<string[]>(value.values);
+  const [excluded, setExcluded] = useState<string[]>(value.excludeValues);
+  const [bucket, setBucket] = useState<"include" | "exclude">("include");
   // Precomputed options: instant, ordered by agent count, "City, ST" display with variant
   // counts and live totals (C2). Office view sees office locations only (A8).
   const { query, setQuery, options, total, agents } = useLocationOptions(field, officeMode ? "office" : "agent");
@@ -254,21 +256,32 @@ export function LocationPopover({ value, onChange, officeMode = false }: { value
       setField(value.field);
       setKinds(value.appliesTo);
       setValues(value.values);
+      setExcluded(value.excludeValues);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   const label = LOCATION_FIELDS.find((f) => f[0] === field)?.[1] ?? "City";
   const toggleKind = (k: LocationKind) => setKinds((a) => (a.includes(k) ? a.filter((x) => x !== k) : [...a, k]));
-  // Hard 50-value cap — the same rule the All-filters drawer enforces on this filter.
+  // Hard 50-value cap across BOTH buckets — the same rule the All-filters drawer enforces.
   const LOCATION_CAP = 50;
-  const toggleValue = (v: string) =>
-    setValues((vs) => (vs.includes(v) ? vs.filter((x) => x !== v) : vs.length >= LOCATION_CAP ? vs : [...vs, v]));
+  // Mode-only radio (A14): steers which bucket NEW picks land in; existing chips never move.
+  const cur = bucket === "include" ? values : excluded;
+  const setCur = bucket === "include" ? setValues : setExcluded;
+  const setOther = bucket === "include" ? setExcluded : setValues;
+  const toggleValue = (v: string) => {
+    if (cur.includes(v)) setCur((vs) => vs.filter((x) => x !== v));
+    else if (values.length + excluded.length < LOCATION_CAP) {
+      setCur((vs) => [...vs, v]);
+      setOther((vs) => vs.filter((x) => x !== v));
+    }
+  };
   const selectAllShown = () =>
-    setValues((vs) => {
+    setCur((vs) => {
       const merged = [...vs];
+      const otherLen = (bucket === "include" ? excluded : values).length;
       for (const o of options) {
-        if (merged.length >= LOCATION_CAP) break;
+        if (merged.length + otherLen >= LOCATION_CAP) break;
         const bare = o.v.replace(/,\s*[A-Za-z]{2}$/, "");
         if (!merged.includes(o.v) && !merged.includes(bare)) merged.push(o.v);
       }
@@ -279,7 +292,7 @@ export function LocationPopover({ value, onChange, officeMode = false }: { value
   return (
     <FilterPopoverShell
       label="Location"
-      count={value.values.length}
+      count={value.values.length + value.excludeValues.length}
       open={open}
       onOpenChange={setOpen}
       width="w-[460px]"
@@ -287,20 +300,27 @@ export function LocationPopover({ value, onChange, officeMode = false }: { value
         setField("city");
         setKinds(["office", "home", "transacted"]);
         setValues([]);
+        setExcluded([]);
         setQuery("");
-        onChange({ field: "city", appliesTo: ["office", "home", "transacted"], values: [] }); // Clear applies immediately (A4)
+        onChange({ field: "city", appliesTo: ["office", "home", "transacted"], values: [], excludeValues: [] }); // Clear applies immediately (A4)
       }}
       onApply={() => {
-        onChange({ field, appliesTo: kinds, values });
+        onChange({ field, appliesTo: kinds, values, excludeValues: excluded });
         setOpen(false);
       }}
     >
+      <div className="mb-2 flex items-center gap-6">
+        {/* Mode-only radios (A14): steer NEW picks; existing chips keep their bucket. */}
+        <RadioOpt label="Include" on={bucket === "include"} onClick={() => setBucket("include")} />
+        <RadioOpt label="Exclude" on={bucket === "exclude"} onClick={() => setBucket("exclude")} />
+      </div>
       <div className="flex gap-2">
         <Select
           value={field}
           onValueChange={(v) => {
             setField(v as LocationField);
             setValues([]);
+            setExcluded([]);
             setQuery("");
           }}
         >
@@ -324,7 +344,7 @@ export function LocationPopover({ value, onChange, officeMode = false }: { value
         <span className="text-neutral-400">
           {total.toLocaleString()} {total === 1 ? "match" : "matches"} · ≈{agents.toLocaleString()} {unit}
           <span className="ml-2 text-neutral-300">|</span>
-          <span className="ml-2">{values.length} selected</span>
+          <span className="ml-2">{values.length + excluded.length} selected</span>
         </span>
         <div className="flex gap-3">
           <button type="button" className="text-neutral-600 hover:underline" onClick={selectAllShown}>
@@ -335,7 +355,8 @@ export function LocationPopover({ value, onChange, officeMode = false }: { value
             className="text-neutral-600 hover:underline"
             onClick={() => {
               setValues([]);
-              onChange({ field, appliesTo: kinds, values: [] }); // Clear applies immediately (A4)
+              setExcluded([]);
+              onChange({ field, appliesTo: kinds, values: [], excludeValues: [] }); // Clear applies immediately (A4)
             }}
           >
             Clear
@@ -349,13 +370,13 @@ export function LocationPopover({ value, onChange, officeMode = false }: { value
           options.map((o) => {
             // a legacy saved view may hold the bare form ("Towson") of this composite option
             const bare = o.v.replace(/,\s*[A-Za-z]{2}$/, "");
-            const checked = values.includes(o.v) || values.includes(bare);
+            const checked = cur.includes(o.v) || cur.includes(bare);
             return (
             <label key={o.v} className="flex items-center gap-2 rounded px-1 py-1.5 text-sm text-neutral-800 hover:bg-neutral-50">
               <Checkbox
                 checked={checked}
                 onCheckedChange={() =>
-                  checked ? setValues((vs) => vs.filter((x) => x !== o.v && x !== bare)) : toggleValue(o.v)
+                  checked ? setCur((vs) => vs.filter((x) => x !== o.v && x !== bare)) : toggleValue(o.v)
                 }
               />
               <span className="min-w-0 flex-1 truncate">{o.v}</span>
@@ -369,7 +390,8 @@ export function LocationPopover({ value, onChange, officeMode = false }: { value
         )}
       </div>
       <Chips items={values} onRemove={(v) => setValues(values.filter((x) => x !== v))} />
-      {values.length >= LOCATION_CAP && (
+      <Chips items={excluded} tone="exclude" onRemove={(v) => setExcluded(excluded.filter((x) => x !== v))} />
+      {values.length + excluded.length >= LOCATION_CAP && (
         <p className="mt-1 px-1 text-[11px] text-amber-600">{LOCATION_CAP} locations max — remove some to add more.</p>
       )}
       {/* Office mode always filters on the OFFICE's location — the kind checkboxes only apply

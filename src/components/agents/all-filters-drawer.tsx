@@ -50,12 +50,18 @@ function Section({ title, count, children }: { title: string; count?: number; ch
 function LocationSection({ value, onChange }: { value: LocationFilter; onChange: (v: LocationFilter) => void }) {
   const { query, setQuery, options } = useTypeahead("location", value.field);
   const label = LOCATION_FIELDS.find((f) => f[0] === value.field)?.[1] ?? "City";
+  const [bucket, setBucket] = useState<"include" | "exclude">("include");
   const toggleKind = (k: LocationKind) =>
     onChange({ ...value, appliesTo: value.appliesTo.includes(k) ? value.appliesTo.filter((x) => x !== k) : [...value.appliesTo, k] });
   return (
-    <Section title="Location" count={value.values.length}>
+    <Section title="Location" count={value.values.length + value.excludeValues.length}>
+      <div className="mb-2 flex items-center gap-6">
+        {/* Mode-only (A14): steers NEW picks; existing chips keep their bucket. */}
+        <RadioOpt label="Include" on={bucket === "include"} onClick={() => setBucket("include")} />
+        <RadioOpt label="Exclude" on={bucket === "exclude"} onClick={() => setBucket("exclude")} />
+      </div>
       <div className="flex gap-2">
-        <Select value={value.field} onValueChange={(v) => onChange({ ...value, field: v as LocationField, values: [] })}>
+        <Select value={value.field} onValueChange={(v) => onChange({ ...value, field: v as LocationField, values: [], excludeValues: [] })}>
           <SelectTrigger className="h-10 w-32 shrink-0">
             <SelectValue />
           </SelectTrigger>
@@ -72,16 +78,22 @@ function LocationSection({ value, onChange }: { value: LocationFilter; onChange:
             placeholder={`Search by ${label.toLowerCase()}`}
             query={query}
             setQuery={setQuery}
-            options={options.filter((o) => !value.values.includes(o))}
+            options={options.filter((o) => !value.values.includes(o) && !value.excludeValues.includes(o))}
             onPick={(v) => {
-              if (!value.values.includes(v) && value.values.length < 50) onChange({ ...value, values: [...value.values, v] }); // hard 50 cap
+              const cap = value.values.length + value.excludeValues.length < 50; // hard 50 cap across both buckets
+              if (!cap) return;
+              if (bucket === "include" && !value.values.includes(v))
+                onChange({ ...value, values: [...value.values, v], excludeValues: value.excludeValues.filter((x) => x !== v) });
+              if (bucket === "exclude" && !value.excludeValues.includes(v))
+                onChange({ ...value, excludeValues: [...value.excludeValues, v], values: value.values.filter((x) => x !== v) });
               setQuery("");
             }}
           />
         </div>
       </div>
-      <div className="mt-1 text-right text-xs text-neutral-400">{value.values.length}/50</div>
+      <div className="mt-1 text-right text-xs text-neutral-400">{value.values.length + value.excludeValues.length}/50</div>
       <Chips items={value.values} onRemove={(v) => onChange({ ...value, values: value.values.filter((x) => x !== v) })} />
+      <Chips items={value.excludeValues} tone="exclude" onRemove={(v) => onChange({ ...value, excludeValues: value.excludeValues.filter((x) => x !== v) })} />
       <div className="mt-3 space-y-2.5">
         {LOCATION_KINDS.map(([k, l]) => (
           <label key={k} className="flex items-center gap-2 text-sm text-neutral-800">
