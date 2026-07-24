@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Search } from "lucide-react";
 import { Sheet, SheetContent, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
@@ -296,6 +296,21 @@ function MlsSection({ value, onChange }: { value: IncludeExclude; onChange: (v: 
 }
 
 function TitleSection({ value, onChange }: { value: IncludeExclude; onChange: (v: IncludeExclude) => void }) {
+  // Canonical titles first, then any extra title token found in the data (agents can hold
+  // several comma-separated titles; the options RPC returns the distinct tokens).
+  const { options } = useTypeahead("title");
+  const titles = useMemo(() => {
+    const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+    const out = [...TITLES];
+    const seen = new Set(out.map(norm));
+    for (const o of options) {
+      if (!seen.has(norm(o))) {
+        seen.add(norm(o));
+        out.push(o);
+      }
+    }
+    return out;
+  }, [options]);
   const toggleInc = (t: string) =>
     onChange({ include: value.include.includes(t) ? value.include.filter((x) => x !== t) : [...value.include, t], exclude: value.exclude.filter((x) => x !== t) });
   const toggleExc = (t: string) =>
@@ -308,7 +323,7 @@ function TitleSection({ value, onChange }: { value: IncludeExclude; onChange: (v
         <span>Exclude</span>
       </div>
       <div className="space-y-2">
-        {TITLES.map((t) => (
+        {titles.map((t) => (
           <div key={t} className="grid grid-cols-[1fr_auto_auto] items-center gap-x-6">
             <span className="text-sm text-neutral-800">{t}</span>
             <div className="flex w-12 justify-center">
