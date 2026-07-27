@@ -12,6 +12,7 @@ import type { IncludeExclude, LocationField, LocationFilter, LocationKind, Offic
 export function useTypeahead(type: string, field?: string) {
   const [query, setQuery] = useState("");
   const [options, setOptions] = useState<string[]>([]);
+  const [counts, setCounts] = useState<Record<string, number>>({}); // option -> agent reach (B2; brand/office)
   const [total, setTotal] = useState(0); // count of the unfiltered list = "total available"
   useEffect(() => {
     let active = true;
@@ -22,9 +23,12 @@ export function useTypeahead(type: string, field?: string) {
         const res = await fetch(`/api/search/options?${p.toString()}`);
         const json = await res.json();
         if (active) {
-          const raw = Array.isArray(json.options) ? (json.options as (string | { v: string })[]) : [];
+          const raw = Array.isArray(json.options) ? (json.options as (string | { v: string; n?: number })[]) : [];
           const opts = raw.map((o) => (typeof o === "string" ? o : o.v));
+          const cnts: Record<string, number> = {};
+          for (const o of raw) if (typeof o === "object" && o && typeof o.n === "number") cnts[o.v] = o.n;
           setOptions(opts);
+          setCounts(cnts);
           if (!query.trim()) setTotal(opts.length);
         }
       } catch {
@@ -36,7 +40,7 @@ export function useTypeahead(type: string, field?: string) {
       clearTimeout(t);
     };
   }, [type, field, query]);
-  return { query, setQuery, options, total };
+  return { query, setQuery, options, counts, total };
 }
 
 export interface LocOpt {
@@ -117,11 +121,13 @@ function CheckList({
   isSelected,
   onToggle,
   emptyText = "No results.",
+  counts,
 }: {
   options: string[];
   isSelected: (o: string) => boolean;
   onToggle: (o: string) => void;
   emptyText?: string;
+  counts?: Record<string, number>; // option -> agent reach, shown right-aligned (B2)
 }) {
   return (
     <>
@@ -133,6 +139,9 @@ function CheckList({
             <label key={o} className="flex items-center gap-2 rounded px-1 py-1.5 text-sm text-neutral-800 hover:bg-neutral-50">
               <Checkbox checked={isSelected(o)} onCheckedChange={() => onToggle(o)} />
               <span className="truncate">{o}</span>
+              {counts?.[o] != null && (
+                <span className="ml-auto shrink-0 text-xs tabular-nums text-neutral-400">{counts[o].toLocaleString()} agents</span>
+              )}
             </label>
           ))
         )}
@@ -419,7 +428,7 @@ export function OfficeSearchPopover({ value, onChange }: { value: OfficeSearchFi
   const [bExc, setBExc] = useState<string[]>(value.brand.exclude);
   const [oInc, setOInc] = useState<string[]>(value.office.include);
   const [oExc, setOExc] = useState<string[]>(value.office.exclude);
-  const { query, setQuery, options, total } = useTypeahead(entity);
+  const { query, setQuery, options, counts, total } = useTypeahead(entity);
 
   useEffect(() => {
     if (open) {
@@ -491,7 +500,7 @@ export function OfficeSearchPopover({ value, onChange }: { value: OfficeSearchFi
         <SearchInput placeholder={`Search ${entity}`} value={query} onChange={setQuery} />
       </div>
       <CountRow selected={totalSelected} total={Math.max(total, totalSelected)} capped={total >= OPTIONS_CAP} onSelectAll={selectAll} onClear={() => { setBInc([]); setBExc([]); setOInc([]); setOExc([]); onChange({ brand: { include: [], exclude: [] }, office: { include: [], exclude: [] } }); }} />
-      <CheckList options={options} isSelected={(o) => cur.includes(o)} onToggle={toggleOne} />
+      <CheckList options={options} counts={counts} isSelected={(o) => cur.includes(o)} onToggle={toggleOne} />
       {(bInc.length > 0 || bExc.length > 0) && (
         <div className="mt-3">
           <div className="text-xs font-medium text-neutral-500">Brand</div>
@@ -515,22 +524,29 @@ interface MlsItem {
   id: string;
   code: string | null;
   name: string | null;
+  updated?: string | null; // per-MLS bulk-refresh date (A8)
+  agents?: number | null; // member agents in this MLS
 }
+
+export const MLS_COUNT_BUCKETS = ["2", "3", "4", "5", "6+"]; // B3: exact counts, 6+ open-ended
 
 export function MlsPopover({
   value,
   multiMls,
+  mlsCount,
   onChange,
 }: {
   value: IncludeExclude;
   multiMls: boolean;
-  onChange: (v: IncludeExclude, multiMls: boolean) => void;
+  mlsCount: { buckets: string[] };
+  onChange: (v: IncludeExclude, multiMls: boolean, mlsCount: { buckets: string[] }) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const [items, setItems] = useState<MlsItem[]>([]);
   const [sel, setSel] = useState<string[]>(value.include);
   const [multi, setMulti] = useState(multiMls);
+  const [countSel, setCountSel] = useState<string[]>(mlsCount.buckets);
   const [clients, setClients] = useState<string[]>([]);
   const [total, setTotal] = useState(0); // total MLS available (from the unfiltered list)
 
@@ -538,6 +554,7 @@ export function MlsPopover({
     if (open) {
       setSel(value.include);
       setMulti(multiMls);
+      setCountSel(mlsCount.buckets);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
@@ -592,17 +609,18 @@ export function MlsPopover({
   return (
     <FilterPopoverShell
       label="MLS"
-      count={value.include.length + (multiMls ? 1 : 0)}
+      count={value.include.length + (multiMls ? 1 : 0) + mlsCount.buckets.length}
       open={open}
       onOpenChange={setOpen}
       width="w-[420px]"
       onClear={() => {
         setSel([]);
         setMulti(false);
-        onChange({ include: [], exclude: [] }, false); // Clear applies immediately (A4)
+        setCountSel([]);
+        onChange({ include: [], exclude: [] }, false, { buckets: [] }); // Clear applies immediately (A4)
       }}
       onApply={() => {
-        onChange({ include: sel, exclude: [] }, multi);
+        onChange({ include: sel, exclude: [] }, multi, { buckets: countSel });
         setOpen(false);
       }}
     >
@@ -611,6 +629,23 @@ export function MlsPopover({
         <Checkbox checked={multi} onCheckedChange={() => setMulti(!multi)} />
         Only agents in multiple MLSs
       </label>
+      {/* B3: exact number of MLS affiliations ("6+" open-ended); pills OR together */}
+      <div className="mb-2 flex items-center gap-2">
+        <span className="text-xs font-medium text-neutral-500">Number of MLSs</span>
+        {MLS_COUNT_BUCKETS.map((b) => (
+          <button
+            key={b}
+            type="button"
+            onClick={() => setCountSel((s) => (s.includes(b) ? s.filter((x) => x !== b) : [...s, b]))}
+            className={cn(
+              "rounded-full border px-2.5 py-0.5 text-xs",
+              countSel.includes(b) ? "border-neutral-900 bg-neutral-900 text-white" : "border-neutral-300 text-neutral-700 hover:border-neutral-400"
+            )}
+          >
+            {b}
+          </button>
+        ))}
+      </div>
       <div className="relative">
         <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400" />
         <input
@@ -633,7 +668,7 @@ export function MlsPopover({
             className="text-neutral-600 hover:underline"
             onClick={() => {
               setSel([]);
-              onChange({ include: [], exclude: [] }, multiMls); // header Clear drops codes only — commits the APPLIED multiMls, never the draft
+              onChange({ include: [], exclude: [] }, multiMls, mlsCount); // header Clear drops codes only — commits the APPLIED multiMls/count, never the draft
             }}
           >
             Clear
@@ -651,6 +686,8 @@ export function MlsPopover({
                 {m.name ?? m.code}
                 {m.code && m.name && m.name !== m.code && <span className="text-neutral-400"> ({m.code})</span>}
               </span>
+              {/* A8: when this MLS's data was last bulk-refreshed */}
+              {m.updated && <span className="ml-auto shrink-0 text-xs tabular-nums text-neutral-400" title="Last data refresh">upd {m.updated}</span>}
             </label>
           ))
         )}

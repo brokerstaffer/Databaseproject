@@ -189,12 +189,12 @@ const COLS_STORAGE = "bs_agent_cols";
 // Office-mode columns (offices table + the office's agents).
 const OFFICE_COLUMNS: Col[] = [
   { key: "office", label: "Office", sortBy: "office_name", render: (o) => <span className="font-semibold text-neutral-900">{na(o.office_name)}</span> },
-  { key: "brand", label: "Brand", render: (o) => na(o.brand) },
-  { key: "officeCity", label: "Office city", render: (o) => (o.office_city ? `${o.office_city}${o.office_state ? `, ${o.office_state}` : ""}` : "N/A") },
-  { key: "officeZip", label: "Office zip", render: (o) => na(o.office_zip) },
+  { key: "brand", label: "Brand", sortBy: "brand", defaultDir: "asc", render: (o) => na(o.brand) },
+  { key: "officeCity", label: "Office city", sortBy: "office_city", defaultDir: "asc", render: (o) => (o.office_city ? `${o.office_city}${o.office_state ? `, ${o.office_state}` : ""}` : "N/A") },
+  { key: "officeZip", label: "Office zip", sortBy: "office_zip", defaultDir: "asc", render: (o) => na(o.office_zip) },
   { key: "vol", label: "Sales volume", sortBy: "sales_volume", align: "right", render: (o) => usd(o.sales_volume) },
-  { key: "list$", label: "List-side ($)", align: "right", render: (o) => usd(o.list_side_dollar) },
-  { key: "buy$", label: "Buy-side ($)", align: "right", render: (o) => usd(o.buy_side_dollar) },
+  { key: "list$", label: "List-side ($)", sortBy: "list_side_dollar", align: "right", render: (o) => usd(o.list_side_dollar) },
+  { key: "buy$", label: "Buy-side ($)", sortBy: "buy_side_dollar", align: "right", render: (o) => usd(o.buy_side_dollar) },
   { key: "units", label: "Units", sortBy: "units", align: "right", render: (o) => numv(o.units) },
   { key: "agentCount", label: "Agents", sortBy: "agent_count", align: "right", render: (o) => numv(o.agent_count) },
   {
@@ -493,8 +493,9 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
               <MlsPopover
                 value={filters.mls}
                 multiMls={filters.multiMls}
-                onChange={(v, multi) => {
-                  setFilters((f) => ({ ...f, mls: v, multiMls: multi }));
+                mlsCount={filters.mlsCount}
+                onChange={(v, multi, mc) => {
+                  setFilters((f) => ({ ...f, mls: v, multiMls: multi, mlsCount: mc }));
                   setPage(1);
                 }}
               />

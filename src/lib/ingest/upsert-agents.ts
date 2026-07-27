@@ -413,6 +413,7 @@ export async function upsertAgentRows(client: PoolClient, rows: Row[], source: s
     const isNew = new Map<string, boolean>();
     const finalById = new Map<string, Prepared>();
     const statByAgent = new Map<string, Record<string, unknown>>();
+    const mlsStatByPair = new Map<string, Record<string, unknown>>();
     const agentMlsByPair = new Map<string, { agent_id: string; mls_id: string; mls_member_id: string | null }>();
     const officeMlsPairs = new Set<string>();
     for (const p of prepared) {
@@ -440,6 +441,9 @@ export async function upsertAgentRows(client: PoolClient, rows: Row[], source: s
       if (mlsId) {
         agentMlsByPair.set(`${agentId}|${mlsId}`, { agent_id: agentId, mls_id: mlsId, mls_member_id: p.memberId });
         if (p.agent.office_id) officeMlsPairs.add(`${p.agent.office_id}|${mlsId}`);
+        // Courted sends one row per (agent, MLS), each with its OWN production block —
+        // keep every MLS's metrics, not just the last row's (A5).
+        if (source === "courted") mlsStatByPair.set(`${agentId}|${mlsId}`, { agent_id: agentId, mls_id: mlsId, ...p.stat });
       }
     }
 
@@ -513,6 +517,19 @@ export async function upsertAgentRows(client: PoolClient, rows: Row[], source: s
       );
     }
 
+    // ---- 7b) agent_mls_stats (one row per agent per MLS — A5; courted only, other
+    // sources carry no MLS). Same-pair re-ingest refreshes the row in place.
+    const mlsStatRows = [...mlsStatByPair.values()];
+    if (mlsStatRows.length) {
+      await client.query(
+        `insert into agent_mls_stats (agent_id, mls_id, ${STAT_COLS.map(([n]) => n).join(", ")}, scraped_at)
+         select x.agent_id, x.mls_id, ${STAT_COLS.map(([n]) => `x.${n}`).join(", ")}, now()
+         from jsonb_to_recordset($1::jsonb) as x(agent_id uuid, mls_id uuid, ${STAT_COLS.map(([n, t]) => `${n} ${t}`).join(", ")})
+         on conflict (agent_id, mls_id) do update set ${STAT_COLS.map(([n]) => `${n} = excluded.${n}`).join(", ")}, scraped_at = now()`,
+        [JSON.stringify(mlsStatRows)]
+      );
+    }
+
     // ---- 8) junctions ----
     const amls = [...agentMlsByPair.values()];
     if (amls.length) {
@@ -557,6 +574,13 @@ export async function upsertAgentRows(client: PoolClient, rows: Row[], source: s
         where o.id = s.id`,
         [touched]
       );
+    }
+
+    // ---- 10) per-MLS freshness (A8): restamp the touched MLSs' last-touched /
+    // bulk-refresh dates from the just-written scraped_at values
+    const touchedMls = [...new Set([...agentMlsByPair.values()].map((x) => x.mls_id))];
+    if (touchedMls.length) {
+      await client.query(`select fn_refresh_mls_freshness($1::uuid[])`, [touchedMls]);
     }
 
     await client.query("commit");

@@ -216,8 +216,20 @@ interface MlsItem {
   id: string;
   code: string | null;
   name: string | null;
+  updated?: string | null; // per-MLS bulk-refresh date (A8)
 }
-function MlsSection({ value, onChange }: { value: IncludeExclude; onChange: (v: IncludeExclude) => void }) {
+const MLS_COUNT_BUCKETS = ["2", "3", "4", "5", "6+"]; // B3 — mirrors the popover
+function MlsSection({
+  value,
+  onChange,
+  mlsCount,
+  onMlsCount,
+}: {
+  value: IncludeExclude;
+  onChange: (v: IncludeExclude) => void;
+  mlsCount: { buckets: string[] };
+  onMlsCount: (v: { buckets: string[] }) => void;
+}) {
   const [q, setQ] = useState("");
   const [items, setItems] = useState<MlsItem[]>([]);
   const [clients, setClients] = useState<string[]>([]);
@@ -263,7 +275,26 @@ function MlsSection({ value, onChange }: { value: IncludeExclude; onChange: (v: 
   const toggle = (id: string) =>
     onChange({ include: value.include.includes(id) ? value.include.filter((x) => x !== id) : [...value.include, id], exclude: [] });
   return (
-    <Section title="MLS" count={value.include.length}>
+    <Section title="MLS" count={value.include.length + mlsCount.buckets.length}>
+      <div className="mb-2 flex items-center gap-2">
+        <span className="text-xs font-medium text-neutral-500">Number of MLSs</span>
+        {MLS_COUNT_BUCKETS.map((b) => (
+          <button
+            key={b}
+            type="button"
+            onClick={() =>
+              onMlsCount({ buckets: mlsCount.buckets.includes(b) ? mlsCount.buckets.filter((x) => x !== b) : [...mlsCount.buckets, b] })
+            }
+            className={
+              mlsCount.buckets.includes(b)
+                ? "rounded-full border border-neutral-900 bg-neutral-900 px-2.5 py-0.5 text-xs text-white"
+                : "rounded-full border border-neutral-300 px-2.5 py-0.5 text-xs text-neutral-700 hover:border-neutral-400"
+            }
+          >
+            {b}
+          </button>
+        ))}
+      </div>
       <div className="relative">
         <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400" />
         <input
@@ -284,6 +315,7 @@ function MlsSection({ value, onChange }: { value: IncludeExclude; onChange: (v: 
                 {m.name ?? m.code}
                 {m.code && m.name && m.name !== m.code && <span className="text-neutral-400"> ({m.code})</span>}
               </span>
+              {m.updated && <span className="ml-auto shrink-0 text-xs tabular-nums text-neutral-400" title="Last data refresh">upd {m.updated}</span>}
             </label>
           ))
         )}
@@ -429,7 +461,7 @@ export function AllFiltersDrawer({
           <LocationSection value={draft.location} onChange={(v) => set("location", v)} />
           <RangeSection title="Sales volume" count={rangeCount(draft.salesVolume)} value={draft.salesVolume} onChange={(v) => set("salesVolume", v as RangeSide)} buckets={SALES_VOLUME_BUCKETS} hasSide prefix="$" />
           <OfficeSearchSection value={draft.officeSearch} onChange={(v) => set("officeSearch", v)} />
-          <MlsSection value={draft.mls} onChange={(v) => set("mls", v)} />
+          <MlsSection value={draft.mls} onChange={(v) => set("mls", v)} mlsCount={draft.mlsCount} onMlsCount={(v) => set("mlsCount", v)} />
           <NameSection value={draft.name} onChange={(v) => set("name", v)} />
           <TitleSection value={draft.title} onChange={(v) => set("title", v)} />
           <LicenseSection value={draft.license} onChange={(v) => set("license", v)} />

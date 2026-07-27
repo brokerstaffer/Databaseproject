@@ -27,6 +27,7 @@ In Broker Staffer: **Admin → API Keys → Generate** (name it e.g. "Courted sc
 ```
 - `source` = `"courted"`, `"zillow"`, or `"realtor"`.
 - `rows` = an array of agents. **Use the exact Courted CSV column names** as the keys (`Name`, `Office`, `State License`, `Email`, `Phone`, `Home City`, `Home State`, `LTM Sales Volume`, `LTM Closed Units`, `MLS`, `Member MLS ID`, etc.) — the same headers as the Courted export. Unknown keys are ignored; missing keys are just left blank.
+- **REQUIRED — one row per agent PER MLS.** When Courted lists the same agent in several MLSs, send **each MLS's row separately** with that MLS's own `MLS ID`, `Member MLS ID`, and production numbers (this is what the Courted export already does — `Courted Agent ID` is `<id>_<MLS>`). Do **not** de-duplicate agents across MLSs on the scraper side: the server stores each MLS's production block separately, and a de-duped feed would permanently lose every MLS's numbers but one.
 
 ## 4. Batching
 Send **up to 2,000 rows per request**. For a large scrape, loop and POST in batches of ~1,000–2,000 until done.
