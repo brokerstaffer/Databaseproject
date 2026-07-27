@@ -95,8 +95,9 @@ export default function LoginPage() {
   return (
     <Card>
       <CardHeader className="text-center">
-        <CardTitle className="text-2xl font-bold">
-          BrokerStaffer
+        <CardTitle>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/logo.svg" alt="BrokerStaffer" className="mx-auto h-14 w-auto" />
         </CardTitle>
         <p className="text-sm text-muted-foreground">
           {resetMode ? "Reset your password" : "Sign in to your account"}

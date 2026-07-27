@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
-import { Search, ClipboardList, Bell, Building2, LogOut } from "lucide-react";
+import { Search, ClipboardList, Bell, LogOut } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -65,8 +65,9 @@ export function TopBar({ initials, email }: { initials: string; email: string })
 
   return (
     <header className="flex h-14 shrink-0 items-center gap-3 bg-neutral-950 px-3 text-white">
-      <Link href="/search" className="flex h-9 w-9 items-center justify-center rounded-md bg-neutral-800 text-white" title="BrokerStaffer">
-        <Building2 className="h-5 w-5" />
+      <Link href="/search" className="flex h-9 w-9 items-center justify-center rounded-md bg-white" title="BrokerStaffer">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src="/logo-badge.svg" alt="BrokerStaffer" className="h-6 w-6" />
       </Link>
       <form
         className="relative w-full max-w-sm"
