@@ -43,3 +43,40 @@ export async function GET(req: NextRequest) {
     bison: { total: bisonTotal.rows[0]?.total ?? 0, matched: bisonTotal.rows[0]?.matched ?? 0, syncedAt: bisonTotal.rows[0]?.at ?? null },
   });
 }
+
+// Manual "Add client" — normally the orchestrator creates clients at onboarding, but a client
+// whose campaign already runs in Bison needs a row here before the sync can attach its leads.
+// Name-only insert; the campaign matcher picks it up on the next sync. Blocks duplicates under
+// the same normalization the matcher uses (case/spacing/punctuation-insensitive).
+export async function POST(req: NextRequest) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+
+  const body = await req.json().catch(() => ({}));
+  const name = typeof body.client_name === "string" ? body.client_name.trim() : "";
+  if (!name) return NextResponse.json({ error: "Client name is required" }, { status: 400 });
+
+  const pool = getPool();
+  const { rows: dupes } = await pool.query(
+    `select client_name from orch_clients
+      where regexp_replace(lower(client_name), '[^a-z0-9]', '', 'g') = regexp_replace(lower($1), '[^a-z0-9]', '', 'g')
+      limit 1`,
+    [name]
+  );
+  if (dupes.length) {
+    return NextResponse.json({ error: `A client named "${dupes[0].client_name}" already exists` }, { status: 409 });
+  }
+
+  const { rows } = await pool.query(
+    `insert into orch_clients (client_name, status) values ($1, 'new') returning id, client_name, status, created_at`,
+    [name]
+  );
+  await pool.query(`insert into audit_logs (action, performed_by, details) values ('client_added', $1, $2)`, [
+    user.email ?? user.id,
+    `Added client "${name}" from the Clients page`,
+  ]);
+  return NextResponse.json({ client: rows[0] });
+}

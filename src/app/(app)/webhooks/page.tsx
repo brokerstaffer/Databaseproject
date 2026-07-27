@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 
 interface OrchClientRow {
@@ -24,15 +26,18 @@ const STATUS_TONE: Record<string, string> = {
   pending: "bg-neutral-100 text-neutral-700",
 };
 
-// Clients page (route kept at /webhooks) — a READ-ONLY view of orch_clients, the shared
-// table the orchestrator and other apps maintain. Clients appear here automatically when
-// onboarded; their campaigns are matched by name ("Client Name + Sender + Market") and
-// sends go through the in-house enrichment pipeline.
+// Clients page (route kept at /webhooks) — a view of orch_clients, the shared table the
+// orchestrator and other apps maintain. Clients appear here automatically when onboarded;
+// "Add client" covers clients that only exist as a Bison campaign. Campaigns are matched by
+// name ("Client Name + Sender + Market") and sends go through the in-house enrichment pipeline.
 export default function ClientsPage() {
   const [clients, setClients] = useState<OrchClientRow[]>([]);
   const [syncedAt, setSyncedAt] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [adding, setAdding] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -63,6 +68,27 @@ export default function ClientsPage() {
     load();
   }
 
+  async function addClient() {
+    const name = newName.trim();
+    if (!name || adding) return;
+    setAdding(true);
+    const res = await fetch("/api/orch/clients", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ client_name: name }),
+    });
+    const j = await res.json().catch(() => ({}));
+    setAdding(false);
+    if (!res.ok) {
+      toast.error(j.error ?? "Failed to add client");
+      return;
+    }
+    setAddOpen(false);
+    setNewName("");
+    toast.success(`Client "${name}" added — syncing campaigns…`);
+    await syncCampaigns();
+  }
+
   return (
     <div className="flex h-full flex-col gap-4">
       <div className="flex items-center justify-between">
@@ -79,6 +105,7 @@ export default function ClientsPage() {
           <Button variant="outline" onClick={syncCampaigns} disabled={syncing} className="gap-1.5">
             {syncing ? "Syncing…" : "Sync campaigns"}
           </Button>
+          <Button onClick={() => setAddOpen(true)}>Add client</Button>
         </div>
       </div>
 
@@ -134,6 +161,35 @@ export default function ClientsPage() {
           </tbody>
         </table>
       </div>
+
+      <Dialog open={addOpen} onOpenChange={(o) => { setAddOpen(o); if (!o) setNewName(""); }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Add client</DialogTitle>
+            <DialogDescription>
+              Use the same name as the client&apos;s EmailBison campaign — after adding, campaigns sync
+              automatically and attach by name.
+            </DialogDescription>
+          </DialogHeader>
+          <Input
+            autoFocus
+            placeholder="Client name"
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") addClient();
+            }}
+          />
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAddOpen(false)} disabled={adding}>
+              Cancel
+            </Button>
+            <Button onClick={addClient} disabled={adding || !newName.trim()}>
+              {adding ? "Adding…" : "Add client"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
