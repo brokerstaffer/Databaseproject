@@ -127,17 +127,23 @@ interface Col {
 }
 
 // Courted default 28-column order.
-// mls codes/ids joined — an agent can belong to several MLSs (dedup keeps them all)
+// mls codes/ids joined — an agent can belong to several MLSs (dedup keeps them all).
+// Some belong to 30+, so the cell is width-capped and truncated; hover shows the full list.
 const mlsCodes = (a: Agent) => a.mls?.map((m) => m.code).filter(Boolean).join(" | ") || "N/A";
 const mlsIds = (a: Agent) => a.mls?.map((m) => m.member_id).filter(Boolean).join(" | ") || "N/A";
+const capped = (text: string) => (
+  <span className="block max-w-[280px] truncate" title={text}>
+    {text}
+  </span>
+);
 
 const COLUMNS: Col[] = [
   { key: "agent", label: "Agent", sortBy: "full_name", render: (a) => <span className="font-semibold text-neutral-900">{na(a.full_name)}</span> },
   { key: "office", label: "Office", sortBy: "office_name", render: (a) => na(a.office_name) },
   { key: "timeInd", label: "Est. time in industry", sortBy: "est_time_in_industry_months", render: (a) => a.est_time_in_industry_raw ?? "N/A" },
   { key: "license", label: "License number", sortBy: "license_number", render: (a) => na(a.license_number) },
-  { key: "mlsAff", label: "MLS affiliation", sortBy: "mls", defaultDir: "asc", render: (a) => mlsCodes(a) },
-  { key: "mlsId", label: "MLS ID", render: (a) => mlsIds(a) },
+  { key: "mlsAff", label: "MLS affiliation", sortBy: "mls", defaultDir: "asc", render: (a) => capped(mlsCodes(a)) },
+  { key: "mlsId", label: "MLS ID", render: (a) => capped(mlsIds(a)) },
   { key: "homeCity", label: "Home city", sortBy: "home_city", render: (a) => (a.home_city ? `${a.home_city}${a.home_state ? `, ${a.home_state}` : ""}` : "N/A") },
   { key: "homeZip", label: "Home zip", sortBy: "home_zip", render: (a) => na(a.home_zip) },
   { key: "brand", label: "Brand", sortBy: "brand", render: (a) => na(a.brand) },
