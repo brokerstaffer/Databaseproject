@@ -385,11 +385,23 @@ export async function upsertAgentRows(client: PoolClient, rows: Row[], source: s
     const distinctMls = new Map<string, Prepared>();
     for (const p of prepared) if (p.mlsCode && !distinctMls.has(p.mlsCode)) distinctMls.set(p.mlsCode, p);
     if (distinctMls.size) {
+      // Resolve by current code OR any former code (aliases — codes are admin-editable);
+      // only genuinely-new codes insert, and an existing MLS's admin-set name is never
+      // overwritten by the scraper.
       const res = await client.query(
-        `insert into mls (code, name, state)
-         select x.code, x.name, x.state from jsonb_to_recordset($1::jsonb) as x(code text, name text, state text)
-         on conflict (code) do update set name = coalesce(excluded.name, mls.name), state = coalesce(excluded.state, mls.state)
-         returning id, code`,
+        `with incoming as (select x.code, x.name, x.state from jsonb_to_recordset($1::jsonb) as x(code text, name text, state text)),
+         matched as (
+           select i.code as code, m.id from incoming i
+           join mls m on m.code = i.code or i.code = any(m.aliases)
+         ),
+         ins as (
+           insert into mls (code, name, state)
+           select i.code, i.name, i.state from incoming i
+            where not exists (select 1 from matched mm where mm.code = i.code)
+           on conflict (code) do update set state = coalesce(mls.state, excluded.state)
+           returning id, code
+         )
+         select code, id from matched union all select code, id from ins`,
         [JSON.stringify([...distinctMls.values()].map((p) => ({ code: p.mlsCode, name: p.mlsName, state: p.mlsState })))]
       );
       for (const row of res.rows) mlsIdByCode.set(row.code, row.id);

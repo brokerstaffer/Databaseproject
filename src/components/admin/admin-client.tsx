@@ -7,8 +7,9 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Copy, Check, Plus, Webhook, KeyRound, Users, ScrollText } from "lucide-react";
+import { Copy, Check, Plus, Webhook, KeyRound, Users, ScrollText, Landmark } from "lucide-react";
 import { toast } from "sonner";
+import { MlsTab } from "./mls-tab";
 
 const ROLES = ["owner", "admin", "manager", "viewer"];
 const fmt = (s: string | null) => (s ? new Date(s).toLocaleString() : "—");
@@ -526,6 +527,7 @@ const SECTIONS = [
   { key: "users", label: "Users", icon: Users, title: "Users", desc: "Invite teammates and manage their roles and access." },
   { key: "keys", label: "API Keys", icon: KeyRound, title: "API Keys", desc: "Generate and revoke keys that authenticate the ingest endpoint." },
   { key: "webhook", label: "Data Webhook", icon: Webhook, title: "Data Webhook", desc: "The endpoint your scraper posts agent data to." },
+  { key: "mls", label: "MLS", icon: Landmark, title: "MLS", desc: "Rename MLS abbreviations and full names — old codes keep matching as aliases." },
   { key: "activity", label: "Activity", icon: ScrollText, title: "Activity", desc: "Recent actions across ingestion, exports, keys, and users." },
 ] as const;
 
@@ -568,6 +570,7 @@ export function AdminClient({ currentUserId }: { currentUserId: string }) {
           {active === "webhook" && <DataWebhookTab />}
           {active === "keys" && <ApiKeysTab />}
           {active === "users" && <UsersTab currentUserId={currentUserId} />}
+          {active === "mls" && <MlsTab />}
           {active === "activity" && <ActivityTab />}
         </div>
       </div>
