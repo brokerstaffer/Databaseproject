@@ -143,6 +143,7 @@ const COLUMNS: Col[] = [
   { key: "office", label: "Office", sortBy: "office_name", render: (a) => na(a.office_name) },
   { key: "timeInd", label: "Est. time in industry", sortBy: "est_time_in_industry_months", render: (a) => a.est_time_in_industry_raw ?? "N/A" },
   { key: "license", label: "License number", sortBy: "license_number", render: (a) => na(a.license_number) },
+  { key: "title", label: "Title", sortBy: "title", defaultDir: "asc", render: (a) => na(a.title as string | null) },
   { key: "mlsAff", label: "MLS affiliation", sortBy: "mls", defaultDir: "asc", render: (a) => capped(mlsCodes(a)) },
   { key: "mlsId", label: "MLS ID", render: (a) => capped(mlsIds(a)) },
   { key: "homeCity", label: "Home city", sortBy: "home_city", render: (a) => (a.home_city ? `${a.home_city}${a.home_state ? `, ${a.home_state}` : ""}` : "N/A") },
