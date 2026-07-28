@@ -13,6 +13,7 @@ export interface LocationFilter {
   appliesTo: LocationKind[];
   values: string[];        // include
   excludeValues: string[]; // exclude (A14) — agents matching any of these are hidden
+  excludeField?: LocationField; // D3: exclude may target a different geography level (defaults to field)
 }
 export interface RangeSide {
   side: VolumeSide;
@@ -69,7 +70,7 @@ export interface Filters {
 }
 
 export const DEFAULT_FILTERS: Filters = {
-  location: { field: "city", appliesTo: ["office", "home", "transacted"], values: [], excludeValues: [] },
+  location: { field: "city", appliesTo: ["office", "home", "transacted"], values: [], excludeValues: [], excludeField: "city" },
   salesVolume: { side: "all", buckets: [], min: "", max: "" },
   closedUnits: { side: "all", buckets: [], min: "", max: "" },
   closedTransactions: { side: "all", buckets: [], min: "", max: "" },
@@ -164,6 +165,7 @@ export function normalizeFilters(
   if (!merged.savedViews) merged.savedViews = { include: [], exclude: [] };
   else merged.savedViews = { include: merged.savedViews.include ?? [], exclude: merged.savedViews.exclude ?? [] };
   if (!merged.location.excludeValues) merged.location = { ...merged.location, excludeValues: [] };
+  if (!merged.location.excludeField) merged.location = { ...merged.location, excludeField: merged.location.field };
   if (!merged.mlsCount || !Array.isArray(merged.mlsCount.buckets)) merged.mlsCount = { buckets: [] };
   delete (merged as Partial<Filters> & { orchClientId?: string }).orchClientId;
   delete (merged as Partial<Filters> & { missingContact?: unknown }).missingContact;

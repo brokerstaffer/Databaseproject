@@ -255,10 +255,12 @@ export function LocationPopover({ value, onChange, officeMode = false }: { value
   const [kinds, setKinds] = useState<LocationKind[]>(value.appliesTo);
   const [values, setValues] = useState<string[]>(value.values);
   const [excluded, setExcluded] = useState<string[]>(value.excludeValues);
+  const [exField, setExField] = useState<LocationField>(value.excludeField ?? value.field); // D3
   const [bucket, setBucket] = useState<"include" | "exclude">("include");
   // Precomputed options: instant, ordered by agent count, "City, ST" display with variant
   // counts and live totals (C2). Office view sees office locations only (A8).
-  const { query, setQuery, options, total, agents } = useLocationOptions(field, officeMode ? "office" : "agent");
+  const activeField = bucket === "include" ? field : exField; // D3: each bucket has its own geography level
+  const { query, setQuery, options, total, agents } = useLocationOptions(activeField, officeMode ? "office" : "agent");
 
   useEffect(() => {
     if (open) {
@@ -266,11 +268,12 @@ export function LocationPopover({ value, onChange, officeMode = false }: { value
       setKinds(value.appliesTo);
       setValues(value.values);
       setExcluded(value.excludeValues);
+      setExField(value.excludeField ?? value.field);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
-  const label = LOCATION_FIELDS.find((f) => f[0] === field)?.[1] ?? "City";
+  const label = LOCATION_FIELDS.find((f) => f[0] === activeField)?.[1] ?? "City";
   const toggleKind = (k: LocationKind) => setKinds((a) => (a.includes(k) ? a.filter((x) => x !== k) : [...a, k]));
   // Hard 50-value cap across BOTH buckets — the same rule the All-filters drawer enforces.
   const LOCATION_CAP = 50;
@@ -311,10 +314,10 @@ export function LocationPopover({ value, onChange, officeMode = false }: { value
         setValues([]);
         setExcluded([]);
         setQuery("");
-        onChange({ field: "city", appliesTo: ["office", "home", "transacted"], values: [], excludeValues: [] }); // Clear applies immediately (A4)
+        onChange({ field: "city", appliesTo: ["office", "home", "transacted"], values: [], excludeValues: [], excludeField: "city" }); // Clear applies immediately (A4)
       }}
       onApply={() => {
-        onChange({ field, appliesTo: kinds, values, excludeValues: excluded });
+        onChange({ field, appliesTo: kinds, values, excludeValues: excluded, excludeField: exField });
         setOpen(false);
       }}
     >
@@ -325,8 +328,9 @@ export function LocationPopover({ value, onChange, officeMode = false }: { value
       </div>
       <div className="flex gap-2">
         <Select
-          value={field}
+          value={activeField}
           onValueChange={(v) => {
+            if (bucket === "exclude") { setExField(v as LocationField); setExcluded([]); setQuery(""); return; }
             setField(v as LocationField);
             setValues([]);
             setExcluded([]);
