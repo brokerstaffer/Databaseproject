@@ -195,6 +195,15 @@ const COLUMNS: Col[] = [
 ];
 
 const DEFAULT_COL_ORDER = COLUMNS.map((c) => c.key);
+// Location-mode columns (D4) — the filtered agents grouped by their office location.
+const LOC_MODE_COLUMNS: Col[] = [
+  { key: "location", label: "Location", sortBy: "location", defaultDir: "asc", render: (r) => <span className="font-semibold text-neutral-900">{na(r.location as string | null)}</span> },
+  { key: "locAgents", label: "Agents", sortBy: "agents", align: "right", render: (r) => numv(r.agents as number | null) },
+  { key: "locOffices", label: "Offices", sortBy: "offices", align: "right", render: (r) => numv(r.offices as number | null) },
+  { key: "vol", label: "Sales volume", sortBy: "sales_volume", align: "right", render: (r) => usd(r.sales_volume) },
+  { key: "units", label: "Units", sortBy: "units", align: "right", render: (r) => numv(r.units) },
+];
+
 const COL_BY_KEY: Record<string, Col> = Object.fromEntries(COLUMNS.map((c) => [c.key, c]));
 const COL_META = COLUMNS.map((c) => ({ key: c.key, label: c.label }));
 const LOCKED_COLS = ["agent", "office"];
@@ -294,6 +303,7 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
   const [mode, setMode] = useState<SearchMode>("agent");
   const [profileId, setProfileId] = useState<string | null>(null); // A5: agent profile dialog
   const [showAllBrands, setShowAllBrands] = useState(false); // B5: include single-office independents
+  const [locGran, setLocGran] = useState<"state" | "county" | "city">("state"); // D4 granularity
   const [source, setSource] = useState<DataSource>("all");
   const [colOrder, setColOrder] = useState<string[]>(DEFAULT_COL_ORDER);
   const [hiddenCols, setHiddenCols] = useState<Set<string>>(new Set());
@@ -324,7 +334,7 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
   }
 
   const visibleColumns = colOrder.map((k) => COL_BY_KEY[k]).filter((c): c is Col => !!c && !hiddenCols.has(c.key));
-  const activeColumns = mode === "office" ? OFFICE_COLUMNS : mode === "brand" ? BRAND_COLUMNS : visibleColumns;
+  const activeColumns = mode === "office" ? OFFICE_COLUMNS : mode === "brand" ? BRAND_COLUMNS : mode === "location" ? LOC_MODE_COLUMNS : visibleColumns;
   const highlightTerm = (filters.nameQuery ?? "").trim();
 
   // (nameQuery is a find/highlight tool, not a filter, so it does not count here.)
@@ -346,6 +356,20 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
   // that office (or brand) applied as an Include filter — replaces the agent-list pop-up.
   function jumpToAgents(kind: "office" | "brand", name: string) {
     setFilters((f) => ({ ...f, officeSearch: { ...f.officeSearch, [kind]: { include: [name], exclude: [] } } }));
+    setMode("agent");
+    setPage(1);
+    setSelected(new Set());
+    setSortBy("sales_volume");
+    setSortDir("desc");
+  }
+
+  // D4: clicking a location row jumps to the agent grid filtered to that place (office kind —
+  // the same basis the tab counts by).
+  function jumpToLocation(label: string) {
+    setFilters((f) => ({
+      ...f,
+      location: { field: locGran, appliesTo: ["office"], values: [label], excludeValues: [], excludeField: locGran },
+    }));
     setMode("agent");
     setPage(1);
     setSelected(new Set());
@@ -404,7 +428,10 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
           page,
           pageSize,
           // B5: single-office "brands" are just the brokerage's own name — hidden by default
-          filters: mode === "brand" && showAllBrands ? { ...filters, includeSingleOfficeBrands: "true" } : filters,
+          filters:
+            mode === "brand" && showAllBrands ? { ...filters, includeSingleOfficeBrands: "true" }
+            : mode === "location" ? { ...filters, locGranularity: locGran }
+            : filters,
         }),
         signal: ctrl.signal,
       });
@@ -418,7 +445,7 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
     } finally {
       if (seq === reqSeq.current) setLoading(false);
     }
-  }, [mode, source, sortBy, sortDir, page, pageSize, filters, showAllBrands]);
+  }, [mode, source, sortBy, sortDir, page, pageSize, filters, showAllBrands, locGran]);
 
   useEffect(() => {
     fetchData();
@@ -469,10 +496,10 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
       <div className="flex items-start justify-between gap-4">
         <div className="flex shrink-0 items-center gap-3">
           <h1 className="text-2xl font-bold tracking-tight text-neutral-900">
-            {mode === "office" ? "Office Search" : mode === "brand" ? "Brand Search" : "Agent Search"}
+            {mode === "office" ? "Office Search" : mode === "brand" ? "Brand Search" : mode === "location" ? "Location Search" : "Agent Search"}
           </h1>
           <div className="inline-flex rounded-lg border border-neutral-300 bg-white p-0.5 text-sm">
-            {(["agent", "office", "brand"] as const).map((m) => (
+            {(["agent", "office", "brand", "location"] as const).map((m) => (
               <button
                 key={m}
                 type="button"
@@ -487,7 +514,7 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
                 }}
                 className={`rounded-md px-3 py-1 font-medium transition-colors ${mode === m ? "bg-brand text-white" : "text-neutral-600 hover:text-neutral-900"}`}
               >
-                {m === "agent" ? "Agent" : m === "office" ? "Office" : "Brand"}
+                {m === "agent" ? "Agent" : m === "office" ? "Office" : m === "brand" ? "Brand" : "Location"}
               </button>
             ))}
           </div>
@@ -589,13 +616,29 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
             ) : (
               <>
                 <span className="font-semibold text-neutral-900">{total.toLocaleString()}</span>
-                <span className="text-neutral-500">{mode === "office" ? " Offices found" : mode === "brand" ? " Brands found" : " Agents found"}</span>
+                <span className="text-neutral-500">{mode === "office" ? " Offices found" : mode === "brand" ? " Brands found" : mode === "location" ? " Locations found" : " Agents found"}</span>
                 <span className="px-2 text-neutral-300">•</span>
                 <span className="font-semibold text-neutral-900">{usdShort(vol)}</span>
                 <span className="text-neutral-500"> Sales volume</span>
                 {mode === "agent" && rows[0]?.mls_scoped === true && (
                   <span className="ml-3 rounded-md bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700" title="Production columns show only the selected MLS's numbers (A5)">
                     Numbers scoped to selected MLS
+                  </span>
+                )}
+                {mode === "location" && (
+                  <span className="ml-4 inline-flex items-center gap-1.5">
+                    {(["state", "county", "city"] as const).map((g) => (
+                      <button
+                        key={g}
+                        type="button"
+                        onClick={() => { setLocGran(g); setPage(1); }}
+                        className={locGran === g
+                          ? "rounded-full border border-brand bg-brand px-2.5 py-0.5 text-xs text-white"
+                          : "rounded-full border border-neutral-300 px-2.5 py-0.5 text-xs text-neutral-700 hover:border-neutral-400"}
+                      >
+                        {g === "state" ? "State" : g === "county" ? "County" : "City"}
+                      </button>
+                    ))}
                   </span>
                 )}
                 {mode === "brand" && (
@@ -615,17 +658,17 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
             )}
           </p>
           <div className="flex items-center gap-1">
-            {mode !== "brand" && (
+            {mode !== "brand" && mode !== "location" && (
               <button type="button" title="Edit columns" onClick={() => setEditOpen(true)} className="rounded-md p-2 text-neutral-500 hover:bg-neutral-100">
                 <SlidersHorizontal className="h-[18px] w-[18px]" />
               </button>
             )}
-            {mode !== "brand" && (
+            {mode !== "brand" && mode !== "location" && (
               <button type="button" title="Export — Send to campaign / CSV" onClick={() => setExportOpen(true)} className="rounded-md p-2 text-neutral-500 hover:bg-neutral-100">
                 <Download className="h-[18px] w-[18px]" />
               </button>
             )}
-            {mode !== "brand" && (
+            {mode !== "brand" && mode !== "location" && (
               <SavedViews
                 filters={filters}
                 onLoad={(f) => {
@@ -644,7 +687,7 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
             <thead className="sticky top-0 z-10 bg-white">
               <tr className="border-b border-neutral-200">
                 <th className="w-10 px-4 py-2.5 text-left">
-                  {mode !== "brand" && <Checkbox checked={allChecked} onCheckedChange={toggleAll} aria-label="Select all" />}
+                  {mode !== "brand" && mode !== "location" && <Checkbox checked={allChecked} onCheckedChange={toggleAll} aria-label="Select all" />}
                 </th>
                 {activeColumns.map((col) => {
                   const active = sortBy === col.sortBy;
@@ -684,7 +727,7 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
               ) : rows.length === 0 ? (
                 <tr>
                   <td colSpan={activeColumns.length + 1} className="py-16 text-center text-sm text-neutral-400">
-                    {mode === "office" ? "No offices found." : mode === "brand" ? "No brands found." : "No agents found."}
+                    {mode === "office" ? "No offices found." : mode === "brand" ? "No brands found." : mode === "location" ? "No locations found." : "No agents found."}
                   </td>
                 </tr>
               ) : (
@@ -692,11 +735,11 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
                   const hit = mode === "agent" && nameMatches(a.full_name, highlightTerm);
                   return (
                     <tr
-                      key={a.id ?? String(a.brand)}
+                      key={a.id ?? String(a.brand ?? a.location)}
                       className="border-b border-neutral-100 hover:bg-neutral-50"
                     >
                       <td className="w-10 px-4 py-3" onClick={(e) => e.stopPropagation()}>
-                        {mode !== "brand" && (
+                        {mode !== "brand" && mode !== "location" && (
                           <Checkbox checked={selected.has(a.id)} onCheckedChange={() => toggleOne(a.id)} aria-label="Select row" />
                         )}
                       </td>
@@ -710,8 +753,10 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
                           : null;
                         const jumpValue = jumpKind === "office" ? a.office_name : jumpKind === "brand" ? a.brand : null;
                         const isProfile = mode === "agent" && col.key === "agent" && !!a.id;
+                        const isLocJump = mode === "location" && col.key === "location" && !!a.location;
                         const onClick =
                           jumpKind && jumpValue ? () => jumpToAgents(jumpKind, String(jumpValue))
+                          : isLocJump ? () => jumpToLocation(String(a.location))
                           : isProfile ? () => setProfileId(a.id)
                           : undefined;
                         return (
