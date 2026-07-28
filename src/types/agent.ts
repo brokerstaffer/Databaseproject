@@ -54,11 +54,12 @@ export interface Agent {
   // office-mode rows (when mode = "office")
   agent_names?: string[] | null;
   agent_count?: number | null;
+  office_count?: number | null; // brand mode (B5): offices under the brand
   [key: string]: unknown;
 }
 
 export type SortDir = "asc" | "desc";
-export type SearchMode = "agent" | "office";
+export type SearchMode = "agent" | "office" | "brand";
 export type DataSource = "all" | "courted" | "zillow_realtor";
 
 export interface SearchResponse {

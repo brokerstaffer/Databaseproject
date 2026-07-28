@@ -39,6 +39,14 @@ export async function POST(req: NextRequest) {
     const { agentIds: _ids, ...result } = await upsertAgentRows(client, rows, source);
     await logAudit({ action: "ingest", performedBy: "scraper", details: `${source}: received ${rows.length} — ${JSON.stringify(result)}` });
     getPool().query("select fn_refresh_location_options(false)").catch(() => {}); // debounced dropdown refresh
+    // saved-view counts drift as data lands (B4) — recount at most every 10 minutes so a
+    // long scrape of many batches doesn't recount per batch
+    getPool()
+      .query(
+        `select fn_refresh_saved_list_counts() where exists
+           (select 1 from saved_lists where cached_at is null or cached_at < now() - interval '10 minutes')`
+      )
+      .catch(() => {});
     return NextResponse.json({ ok: true, source, received: rows.length, ...result });
   } catch (e) {
     console.error("ingest error:", e);

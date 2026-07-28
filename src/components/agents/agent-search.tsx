@@ -18,6 +18,7 @@ import { LocationPopover, OfficeSearchPopover, MlsPopover, LicensePopover, NameP
 import { ExportDialog } from "./export-dialog";
 import { SavedViews } from "./saved-views";
 import { EditColumnsModal } from "./edit-columns";
+import { AgentProfileDialog } from "./agent-profile";
 import { AllFiltersDrawer } from "./all-filters-drawer";
 import { DEFAULT_FILTERS, SALES_VOLUME_BUCKETS, COUNT_BUCKETS, YEAR_BUCKETS, GCI_BUCKETS, activeFilterCount, normalizeFilters } from "@/types/agent-filters";
 import type { Filters } from "@/types/agent-filters";
@@ -210,6 +211,15 @@ const OFFICE_COLUMNS: Col[] = [
   },
 ];
 
+// Brand-mode columns (B5) — aggregates over the filtered offices, grouped per brand.
+const BRAND_COLUMNS: Col[] = [
+  { key: "brand", label: "Brand", sortBy: "brand", defaultDir: "asc", render: (b) => <span className="font-semibold text-neutral-900">{na(b.brand)}</span> },
+  { key: "officeCount", label: "Offices", sortBy: "office_count", align: "right", render: (b) => numv(b.office_count) },
+  { key: "agentCount", label: "Agents", sortBy: "agent_count", align: "right", render: (b) => numv(b.agent_count) },
+  { key: "vol", label: "Sales volume", sortBy: "sales_volume", align: "right", render: (b) => usd(b.sales_volume) },
+  { key: "units", label: "Units", sortBy: "units", align: "right", render: (b) => numv(b.units) },
+];
+
 // Which table columns each ACTIVE filter acts on — those headers get a light-gray tint so it's
 // obvious at a glance which columns are being filtered. Keys match COLUMNS / OFFICE_COLUMNS.
 function highlightedColumns(f: Filters, mode: SearchMode): Set<string> {
@@ -269,6 +279,8 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
   const [editOpen, setEditOpen] = useState(false);
   const [allFiltersOpen, setAllFiltersOpen] = useState(false);
   const [mode, setMode] = useState<SearchMode>("agent");
+  const [profileId, setProfileId] = useState<string | null>(null); // A5: agent profile dialog
+  const [showAllBrands, setShowAllBrands] = useState(false); // B5: include single-office independents
   const [source, setSource] = useState<DataSource>("all");
   const [colOrder, setColOrder] = useState<string[]>(DEFAULT_COL_ORDER);
   const [hiddenCols, setHiddenCols] = useState<Set<string>>(new Set());
@@ -299,7 +311,7 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
   }
 
   const visibleColumns = colOrder.map((k) => COL_BY_KEY[k]).filter((c): c is Col => !!c && !hiddenCols.has(c.key));
-  const activeColumns = mode === "office" ? OFFICE_COLUMNS : visibleColumns;
+  const activeColumns = mode === "office" ? OFFICE_COLUMNS : mode === "brand" ? BRAND_COLUMNS : visibleColumns;
   const highlightTerm = (filters.nameQuery ?? "").trim();
 
   // (nameQuery is a find/highlight tool, not a filter, so it does not count here.)
@@ -371,7 +383,16 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
       const res = await fetch("/api/search/filter", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode, source, sortBy, sortDir, page, pageSize, filters }),
+        body: JSON.stringify({
+          mode,
+          source,
+          sortBy,
+          sortDir,
+          page,
+          pageSize,
+          // B5: single-office "brands" are just the brokerage's own name — hidden by default
+          filters: mode === "brand" && showAllBrands ? { ...filters, includeSingleOfficeBrands: "true" } : filters,
+        }),
         signal: ctrl.signal,
       });
       const json: SearchResponse = await res.json();
@@ -384,7 +405,7 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
     } finally {
       if (seq === reqSeq.current) setLoading(false);
     }
-  }, [mode, source, sortBy, sortDir, page, pageSize, filters]);
+  }, [mode, source, sortBy, sortDir, page, pageSize, filters, showAllBrands]);
 
   useEffect(() => {
     fetchData();
@@ -434,9 +455,11 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
       {/* Title + filters */}
       <div className="flex items-start justify-between gap-4">
         <div className="flex shrink-0 items-center gap-3">
-          <h1 className="text-2xl font-bold tracking-tight text-neutral-900">{mode === "office" ? "Office Search" : "Agent Search"}</h1>
+          <h1 className="text-2xl font-bold tracking-tight text-neutral-900">
+            {mode === "office" ? "Office Search" : mode === "brand" ? "Brand Search" : "Agent Search"}
+          </h1>
           <div className="inline-flex rounded-lg border border-neutral-300 bg-white p-0.5 text-sm">
-            {(["agent", "office"] as const).map((m) => (
+            {(["agent", "office", "brand"] as const).map((m) => (
               <button
                 key={m}
                 type="button"
@@ -445,13 +468,13 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
                   setMode(m);
                   setPage(1);
                   setSelected(new Set());
-                  // office & agent modes sort on different columns — reset to the default
+                  // modes sort on different columns — reset to the default
                   setSortBy("sales_volume");
                   setSortDir("desc");
                 }}
                 className={`rounded-md px-3 py-1 font-medium transition-colors ${mode === m ? "bg-neutral-900 text-white" : "text-neutral-600 hover:text-neutral-900"}`}
               >
-                {m === "agent" ? "Agent" : "Office"}
+                {m === "agent" ? "Agent" : m === "office" ? "Office" : "Brand"}
               </button>
             ))}
           </div>
@@ -485,7 +508,7 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
           {/* Only the filters the current mode's query actually applies are shown — office
               mode narrows on location / volume / office / units / agent count / client. */}
           <ClientPopover value={filters.orchClientIds} clientMode={filters.orchClientMode} onChange={(ids, m) => { setFilters((p) => ({ ...p, orchClientIds: ids, orchClientMode: m })); setPage(1); }} />
-          <LocationPopover value={filters.location} onChange={(v) => setF("location", v)} officeMode={mode === "office"} />
+          <LocationPopover value={filters.location} onChange={(v) => setF("location", v)} officeMode={mode !== "agent"} />
           <RangePopover label="Sales volume" hasSide prefix="$" buckets={SALES_VOLUME_BUCKETS} value={filters.salesVolume} onChange={(v) => setF("salesVolume", v)} />
           <OfficeSearchPopover value={filters.officeSearch} onChange={(v) => setF("officeSearch", v)} />
           {mode === "agent" && (
@@ -553,28 +576,47 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
             ) : (
               <>
                 <span className="font-semibold text-neutral-900">{total.toLocaleString()}</span>
-                <span className="text-neutral-500">{mode === "office" ? " Offices found" : " Agents found"}</span>
+                <span className="text-neutral-500">{mode === "office" ? " Offices found" : mode === "brand" ? " Brands found" : " Agents found"}</span>
                 <span className="px-2 text-neutral-300">•</span>
                 <span className="font-semibold text-neutral-900">{usdShort(vol)}</span>
                 <span className="text-neutral-500"> Sales volume</span>
+                {mode === "brand" && (
+                  <label className="ml-4 inline-flex items-center gap-1.5 text-xs text-neutral-600">
+                    <Checkbox
+                      checked={showAllBrands}
+                      onCheckedChange={() => {
+                        setShowAllBrands((v) => !v);
+                        setPage(1);
+                      }}
+                      aria-label="Include single-office brands"
+                    />
+                    Include single-office brands
+                  </label>
+                )}
               </>
             )}
           </p>
           <div className="flex items-center gap-1">
-            <button type="button" title="Edit columns" onClick={() => setEditOpen(true)} className="rounded-md p-2 text-neutral-500 hover:bg-neutral-100">
-              <SlidersHorizontal className="h-[18px] w-[18px]" />
-            </button>
-            <button type="button" title="Export — Send to campaign / CSV" onClick={() => setExportOpen(true)} className="rounded-md p-2 text-neutral-500 hover:bg-neutral-100">
-              <Download className="h-[18px] w-[18px]" />
-            </button>
-            <SavedViews
-              filters={filters}
-              onLoad={(f) => {
-                setFilters(normalizeFilters(f)); // fills newer keys + folds legacy orchClientId -> orchClientIds
-                setNameSearch(f.nameQuery ?? ""); // keep the top-bar search box in sync with the loaded view
-                setPage(1);
-              }}
-            />
+            {mode !== "brand" && (
+              <button type="button" title="Edit columns" onClick={() => setEditOpen(true)} className="rounded-md p-2 text-neutral-500 hover:bg-neutral-100">
+                <SlidersHorizontal className="h-[18px] w-[18px]" />
+              </button>
+            )}
+            {mode !== "brand" && (
+              <button type="button" title="Export — Send to campaign / CSV" onClick={() => setExportOpen(true)} className="rounded-md p-2 text-neutral-500 hover:bg-neutral-100">
+                <Download className="h-[18px] w-[18px]" />
+              </button>
+            )}
+            {mode !== "brand" && (
+              <SavedViews
+                filters={filters}
+                onLoad={(f) => {
+                  setFilters(normalizeFilters(f)); // fills newer keys + folds legacy orchClientId -> orchClientIds
+                  setNameSearch(f.nameQuery ?? ""); // keep the top-bar search box in sync with the loaded view
+                  setPage(1);
+                }}
+              />
+            )}
           </div>
         </div>
 
@@ -584,7 +626,7 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
             <thead className="sticky top-0 z-10 bg-white">
               <tr className="border-b border-neutral-200">
                 <th className="w-10 px-4 py-2.5 text-left">
-                  <Checkbox checked={allChecked} onCheckedChange={toggleAll} aria-label="Select all" />
+                  {mode !== "brand" && <Checkbox checked={allChecked} onCheckedChange={toggleAll} aria-label="Select all" />}
                 </th>
                 {activeColumns.map((col) => {
                   const active = sortBy === col.sortBy;
@@ -624,32 +666,42 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
               ) : rows.length === 0 ? (
                 <tr>
                   <td colSpan={activeColumns.length + 1} className="py-16 text-center text-sm text-neutral-400">
-                    No agents found.
+                    {mode === "office" ? "No offices found." : mode === "brand" ? "No brands found." : "No agents found."}
                   </td>
                 </tr>
               ) : (
                 rows.map((a) => {
-                  const hit = mode !== "office" && nameMatches(a.full_name, highlightTerm);
+                  const hit = mode === "agent" && nameMatches(a.full_name, highlightTerm);
                   return (
                     <tr
-                      key={a.id}
+                      key={a.id ?? String(a.brand)}
                       className="border-b border-neutral-100 hover:bg-neutral-50"
                     >
                       <td className="w-10 px-4 py-3" onClick={(e) => e.stopPropagation()}>
-                        <Checkbox checked={selected.has(a.id)} onCheckedChange={() => toggleOne(a.id)} aria-label="Select row" />
+                        {mode !== "brand" && (
+                          <Checkbox checked={selected.has(a.id)} onCheckedChange={() => toggleOne(a.id)} aria-label="Select row" />
+                        )}
                       </td>
                       {activeColumns.map((col) => {
                         const cellHit = hit && col.key === "agent"; // light-green highlight on the matching name
-                        // A13: in Office view the office/brand cells jump to the agent grid
-                        // with that value applied as an Include filter.
-                        const jumpKind = mode === "office" && col.key === "office" ? "office" : mode === "office" && col.key === "brand" ? "brand" : null;
+                        // A13/B5: office & brand cells jump to the agent grid with that value
+                        // applied as an Include filter; the agent name opens the profile (A5).
+                        const jumpKind =
+                          mode === "office" && col.key === "office" ? "office"
+                          : (mode === "office" || mode === "brand") && col.key === "brand" ? "brand"
+                          : null;
                         const jumpValue = jumpKind === "office" ? a.office_name : jumpKind === "brand" ? a.brand : null;
+                        const isProfile = mode === "agent" && col.key === "agent" && !!a.id;
+                        const onClick =
+                          jumpKind && jumpValue ? () => jumpToAgents(jumpKind, String(jumpValue))
+                          : isProfile ? () => setProfileId(a.id)
+                          : undefined;
                         return (
                           <td
                             key={col.key}
-                            onClick={jumpKind && jumpValue ? () => jumpToAgents(jumpKind, String(jumpValue)) : undefined}
-                            title={jumpKind && jumpValue ? `Show agents in this ${jumpKind}` : undefined}
-                            className={`whitespace-nowrap px-4 py-3 text-neutral-700 ${col.align === "right" ? "text-right tabular-nums" : "text-left"} ${cellHit ? "bg-green-200/70" : highlightedCols.has(col.key) ? "bg-neutral-50" : ""} ${jumpKind && jumpValue ? "cursor-pointer hover:underline" : ""}`}
+                            onClick={onClick}
+                            title={jumpKind && jumpValue ? `Show agents in this ${jumpKind}` : isProfile ? "Open profile" : undefined}
+                            className={`whitespace-nowrap px-4 py-3 text-neutral-700 ${col.align === "right" ? "text-right tabular-nums" : "text-left"} ${cellHit ? "bg-green-200/70" : highlightedCols.has(col.key) ? "bg-neutral-50" : ""} ${onClick ? "cursor-pointer hover:underline" : ""}`}
                           >
                             {col.render(a)}
                           </td>
@@ -703,6 +755,7 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
         </div>
       </div>
 
+      <AgentProfileDialog agentId={profileId} onClose={() => setProfileId(null)} />
       <ExportDialog open={exportOpen} onOpenChange={setExportOpen} filters={filters} total={total} selectedIds={Array.from(selected)} source={source} mode={mode} />
       <EditColumnsModal
         open={editOpen}

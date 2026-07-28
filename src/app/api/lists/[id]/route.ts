@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { getPool } from "@/lib/db/pool";
 
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -10,6 +11,8 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
   if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const { error } = await supabase.from("saved_lists").delete().eq("id", id).eq("user_id", user.id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  // across-all-views totals just lost a member (B4)
+  void getPool().query("select fn_refresh_saved_list_counts('{}'::uuid[])").catch(() => {});
   return NextResponse.json({ ok: true });
 }
 
@@ -28,5 +31,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (Object.keys(patch).length === 0) return NextResponse.json({ error: "nothing to update" }, { status: 400 });
   const { error } = await supabase.from("saved_lists").update(patch).eq("id", id).eq("user_id", user.id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  // recount in the background if the membership definition changed (B4)
+  if (patch.filters !== undefined) {
+    void getPool().query("select fn_refresh_saved_list_counts($1::uuid[])", [[id]]).catch(() => {});
+  }
   return NextResponse.json({ ok: true });
 }

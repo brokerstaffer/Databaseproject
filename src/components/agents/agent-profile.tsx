@@ -1,0 +1,164 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+
+// A5: agent profile — identity, combined production, then one section per MLS with that
+// MLS's own numbers. Per-MLS figures fill in as the 15-day refresh cycles land; until an
+// MLS re-scrapes, its section shows membership with a "not yet captured" placeholder.
+
+interface MlsRow {
+  code: string | null;
+  name: string | null;
+  mls_member_id: string | null;
+  mls_refreshed: string | null;
+  sales_volume: string | null;
+  pct_change: string | null;
+  buy_side_dollar: string | null;
+  list_side_dollar: string | null;
+  approx_gci: string | null;
+  avg_sale_price: string | null;
+  closed_transactions: string | null;
+  units: string | null;
+  buy_side_count: string | null;
+  list_side_count: string | null;
+  closed_rentals: string | null;
+  avg_rental_price: string | null;
+  stats_as_of: string | null;
+}
+interface Profile {
+  agent: Record<string, string | number | null> & { full_name: string | null };
+  mls: MlsRow[];
+  sources: { source: string; sales_volume: string | null; units: string | null; scraped: string | null }[];
+}
+
+const usd = (v: string | number | null | undefined) =>
+  v == null || v === "" ? "—" : "$" + Math.round(Number(v)).toLocaleString();
+const num = (v: string | number | null | undefined) => (v == null || v === "" ? "—" : Number(v).toLocaleString());
+
+function Stat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0">
+      <div className="text-[11px] text-neutral-500">{label}</div>
+      <div className="truncate text-sm font-medium tabular-nums text-neutral-900">{value}</div>
+    </div>
+  );
+}
+
+function StatGrid({ s }: { s: { [k: string]: string | number | null | undefined } | MlsRow }) {
+  const g = s as { [k: string]: string | number | null | undefined };
+  return <StatGridInner s={g} />;
+}
+
+function StatGridInner({ s }: { s: { [k: string]: string | number | null | undefined } }) {
+  return (
+    <div className="grid grid-cols-4 gap-x-4 gap-y-2">
+      <Stat label="Sales volume" value={usd(s.sales_volume)} />
+      <Stat label="Buy-side ($)" value={usd(s.buy_side_dollar)} />
+      <Stat label="List-side ($)" value={usd(s.list_side_dollar)} />
+      <Stat label="Est. GCI" value={usd(s.approx_gci)} />
+      <Stat label="Avg sale price" value={usd(s.avg_sale_price)} />
+      <Stat label="Closed transactions" value={num(s.closed_transactions)} />
+      <Stat label="Units" value={num(s.units)} />
+      <Stat label="Rentals" value={num(s.closed_rentals)} />
+    </div>
+  );
+}
+
+export function AgentProfileDialog({ agentId, onClose }: { agentId: string | null; onClose: () => void }) {
+  const [profile, setProfile] = useState<Profile | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!agentId) return;
+    setProfile(null);
+    setError(null);
+    let active = true;
+    fetch(`/api/agents/profile?id=${agentId}`)
+      .then((r) => r.json())
+      .then((j) => {
+        if (!active) return;
+        if (j.error) setError(j.error);
+        else setProfile(j as Profile);
+      })
+      .catch(() => active && setError("Failed to load profile"));
+    return () => {
+      active = false;
+    };
+  }, [agentId]);
+
+  const a = profile?.agent;
+  const multi = (profile?.mls.length ?? 0) > 1;
+  return (
+    <Dialog open={!!agentId} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>{a?.full_name ?? "Agent profile"}</DialogTitle>
+        </DialogHeader>
+        {error ? (
+          <p className="py-8 text-center text-sm text-red-600">{error}</p>
+        ) : !profile || !a ? (
+          <p className="py-8 text-center text-sm text-neutral-400">Loading…</p>
+        ) : (
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-sm">
+              <div className="text-neutral-600">
+                {String(a.title ?? "")}
+                {a.license_number ? ` · License #${a.license_number}` : ""}
+              </div>
+              <div className="truncate text-neutral-600">{[a.brand, a.office_name].filter(Boolean).join(" — ") || "No office on file"}</div>
+              <div className="truncate text-neutral-600">{String(a.enriched_email ?? a.preferred_email ?? "No email")}</div>
+              <div className="text-neutral-600">{String(a.preferred_phone ?? "No phone")}</div>
+            </div>
+
+            <div className="rounded-xl border border-neutral-200 p-3">
+              <div className="mb-2 flex items-baseline justify-between">
+                <span className="text-sm font-semibold text-neutral-900">Production {multi ? "(combined)" : ""}</span>
+                <span className="text-[11px] text-neutral-400">
+                  {multi ? "one arbitrary MLS's figures until per-MLS data completes — see below" : ""}
+                </span>
+              </div>
+              <StatGrid s={a} />
+            </div>
+
+            <div>
+              <div className="mb-1 text-sm font-semibold text-neutral-900">
+                MLS affiliations ({profile.mls.length})
+              </div>
+              <div className="space-y-2">
+                {profile.mls.length === 0 && <p className="text-sm text-neutral-400">No MLS memberships on file.</p>}
+                {profile.mls.map((m) => (
+                  <div key={m.code ?? Math.random()} className="rounded-xl border border-neutral-200 p-3">
+                    <div className="mb-2 flex items-baseline justify-between gap-2">
+                      <span className="truncate text-sm font-medium text-neutral-900">
+                        {m.name ?? m.code}
+                        {m.code && m.name && m.name !== m.code && <span className="text-neutral-400"> ({m.code})</span>}
+                      </span>
+                      <span className="shrink-0 text-[11px] text-neutral-400">
+                        {m.mls_member_id ? `Member ID ${m.mls_member_id}` : ""}
+                        {m.mls_refreshed ? ` · MLS refreshed ${m.mls_refreshed}` : ""}
+                      </span>
+                    </div>
+                    {m.stats_as_of ? (
+                      <StatGrid s={m} />
+                    ) : (
+                      <p className="text-xs text-neutral-400">
+                        Per-MLS numbers not captured yet — they arrive with this MLS&apos;s next data refresh.
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {profile.sources.length > 1 && (
+              <p className="text-[11px] text-neutral-400">
+                Sources: {profile.sources.map((s) => `${s.source} (${s.scraped ?? "?"})`).join(" · ")}
+              </p>
+            )}
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}

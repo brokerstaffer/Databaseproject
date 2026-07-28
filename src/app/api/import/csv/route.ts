@@ -60,6 +60,12 @@ export async function POST(req: NextRequest) {
       meta: { kind: "csv_import", fileName, source, received: rows.length, orchClientId, linked, ...result },
     });
     getPool().query("select fn_refresh_location_options(false)").catch(() => {}); // debounced dropdown refresh
+    getPool()
+      .query(
+        `select fn_refresh_saved_list_counts() where exists
+           (select 1 from saved_lists where cached_at is null or cached_at < now() - interval '10 minutes')`
+      )
+      .catch(() => {}); // B4: recount saved views, 10-min debounce
     return NextResponse.json({ ok: true, source, received: rows.length, linked, client: clientName, ...result });
   } catch (e) {
     console.error("csv import error:", e);

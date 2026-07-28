@@ -49,6 +49,9 @@ async function handle(req: NextRequest) {
     // aborted runs), so the handler kicks it off in the background and answers immediately;
     // completion/failure is recorded in audit_logs (action 'bison_lead_sync').
     void runLeadSync(pool, key, base).catch((e) => console.error("lead sync crashed:", e instanceof Error ? e.message : e));
+    // B4 safety net: this route already runs every 6h (bison-cron), so piggyback the
+    // saved-view recount here — covers direct-SQL data changes no API hook sees
+    void pool.query("select fn_refresh_saved_list_counts()").catch(() => {});
     return NextResponse.json({ ok: true, campaigns: camps.length, leadSync: { started: true, note: "runs in background; see audit_logs action=bison_lead_sync" } }, { status: 202 });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "failed";

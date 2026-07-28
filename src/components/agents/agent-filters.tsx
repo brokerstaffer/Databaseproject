@@ -628,6 +628,12 @@ export function TitlePopover({ value, onChange }: { value: IncludeExclude; onCha
 interface SavedViewOpt {
   id: string;
   name: string;
+  count: number | null; // cached agent count (B4) — refreshed on save/edit/import/6h sync
+}
+interface SavedViewTotals {
+  union_count: number | null; // unique agents in at least one view
+  sum_count: number | string | null;
+  refreshed_at: string | null;
 }
 export function SavedViewsPopover({
   value,
@@ -638,6 +644,7 @@ export function SavedViewsPopover({
 }) {
   const [open, setOpen] = useState(false);
   const [views, setViews] = useState<SavedViewOpt[] | null>(null);
+  const [totals, setTotals] = useState<SavedViewTotals | null>(null);
   const [inc, setInc] = useState<string[]>(value.include);
   const [exc, setExc] = useState<string[]>(value.exclude);
   const [q, setQ] = useState("");
@@ -649,7 +656,16 @@ export function SavedViewsPopover({
       if (views === null) {
         fetch("/api/lists")
           .then((r) => r.json())
-          .then((j) => setViews(((j.lists ?? []) as { id: string; name: string }[]).map((l) => ({ id: l.id, name: l.name }))))
+          .then((j) => {
+            setViews(
+              ((j.lists ?? []) as { id: string; name: string; cached_count?: number | null }[]).map((l) => ({
+                id: l.id,
+                name: l.name,
+                count: l.cached_count ?? null,
+              }))
+            );
+            setTotals((j.totals as SavedViewTotals) ?? null);
+          })
           .catch(() => setViews([]));
       }
     }
@@ -689,6 +705,39 @@ export function SavedViewsPopover({
         Include = only agents in ANY of the chosen views; Exclude = hide agents in any of them. Evaluated
         live, so it always reflects each view&apos;s current membership.
       </p>
+      <div className="mb-2 flex items-center justify-between text-xs">
+        <span className="text-neutral-400" title={totals?.refreshed_at ? `Counts as of ${new Date(totals.refreshed_at).toLocaleString()}` : undefined}>
+          {totals?.union_count != null && (
+            <>
+              All views: <span className="font-medium text-neutral-700">{totals.union_count.toLocaleString()}</span> unique agents
+            </>
+          )}
+        </span>
+        <div className="flex shrink-0 gap-3">
+          <button
+            type="button"
+            className="text-neutral-600 hover:underline"
+            onClick={() => {
+              const ids = shown.map((v) => v.id); // acts on the rows currently listed (search-filtered)
+              setInc((a) => Array.from(new Set([...a, ...ids])));
+              setExc((a) => a.filter((x) => !ids.includes(x)));
+            }}
+          >
+            Include all
+          </button>
+          <button
+            type="button"
+            className="text-neutral-600 hover:underline"
+            onClick={() => {
+              const ids = shown.map((v) => v.id);
+              setExc((a) => Array.from(new Set([...a, ...ids])));
+              setInc((a) => a.filter((x) => !ids.includes(x)));
+            }}
+          >
+            Exclude all
+          </button>
+        </div>
+      </div>
       {views && views.length > 6 && (
         <input
           value={q}
@@ -710,6 +759,7 @@ export function SavedViewsPopover({
             return (
               <div key={v.id} className="flex items-center gap-2 rounded-lg px-1 py-1">
                 <span className="min-w-0 flex-1 truncate text-sm text-neutral-800" title={v.name}>{v.name}</span>
+                {v.count != null && <span className="shrink-0 text-xs tabular-nums text-neutral-400">{v.count.toLocaleString()}</span>}
                 <div className="flex shrink-0 gap-1">
                   <button
                     type="button"

@@ -12,6 +12,7 @@ interface SavedList {
   id: string;
   name: string;
   filters: Filters;
+  cached_count?: number | null; // B4: cached agent count, refreshed on save/edit/import/6h sync
 }
 
 export function SavedViews({ filters, onLoad }: { filters: Filters; onLoad: (f: Filters) => void }) {
@@ -149,6 +150,9 @@ export function SavedViews({ filters, onLoad }: { filters: Filters; onLoad: (f: 
                   >
                     <FolderOpen className="h-4 w-4 shrink-0 text-neutral-400" />
                     <span className="truncate">{v.name}</span>
+                    {v.cached_count != null && (
+                      <span className="shrink-0 text-xs tabular-nums text-neutral-400">{v.cached_count.toLocaleString()}</span>
+                    )}
                   </button>
                   <div className="flex shrink-0 items-center gap-2">
                     <button
