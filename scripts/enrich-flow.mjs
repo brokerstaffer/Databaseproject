@@ -114,8 +114,8 @@ async function instantlyVerify(email) {
   let status = null;
   // first call kicks off the verification ("pending"); re-POSTing the same email returns the
   // finished verdict (verified live 2026-07-08 — there is no working GET endpoint for this).
-  for (let i = 0; i < 20; i++) {
-    if (i > 0) await new Promise((r) => setTimeout(r, 3000));
+  for (let i = 0; i < 60; i++) {
+    if (i > 0) await new Promise((r) => setTimeout(r, 1000)); // 1s granularity — a verify often finishes in 1-3s and the old 3s poll wasted ~2s per round
     const j = await jsonFetch("https://api.instantly.ai/api/v2/email-verification", {
       method: "POST", headers, body: JSON.stringify({ email }),
     });

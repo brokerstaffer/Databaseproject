@@ -40,12 +40,16 @@ const CLAIM_BATCH = Math.min(100, Number(env.CLAIM_BATCH) || 25); // <=100 keeps
 const STALE_MIN = Number(env.STALE_MIN) || 60;
 const MAX_ATTEMPTS = 3;
 const FALLBACK = env.USE_PREFERRED_EMAIL_FALLBACK === "1";
+// Items enrich concurrently — an item is ~15s of SERIAL external API waits, so sequential
+// processing capped the pipeline at ~3 items/min. 429s are already retried with backoff
+// per call (jsonFetch); dial down via env if a provider starts erroring under load.
+const ENRICH_CONCURRENCY = Math.max(1, Math.min(25, Number(env.ENRICH_CONCURRENCY) || 8));
 
 if (!env.DATABASE_URL) {
   console.error("DATABASE_URL is not set");
   process.exit(1);
 }
-const pool = new pg.Pool({ connectionString: env.DATABASE_URL, max: 5 });
+const pool = new pg.Pool({ connectionString: env.DATABASE_URL, max: Math.max(10, ENRICH_CONCURRENCY + 4) });
 pool.on("error", (e) => console.error("pg pool idle-client error:", e.message)); // never crash the loop
 
 let shuttingDown = false;
@@ -444,16 +448,11 @@ async function enrichCycle() {
   );
   const priorityOf = new Map(eBatches.map((b) => [b.id, b.source_priority]));
 
-  for (let n = 0; n < items.length; n++) {
-    const item = items[n];
-    if (shuttingDown) {
-      await releaseItems(items.slice(n), token, "pending");
-      break;
-    }
+  const processOne = async (item) => {
     const agent = agents.get(item.agent_id);
     if (!agent) {
       await setItem(item, token, { status: "failed", error: "agent no longer exists", claimed_at: null });
-      continue;
+      return;
     }
     try {
       // Fresh cache read at use time: a sibling batch (or the other worker during a deploy)
@@ -482,7 +481,7 @@ async function enrichCycle() {
             error: null, claimed_at: null,
           });
         }
-        continue;
+        return;
       }
 
       const log = [];
@@ -531,6 +530,25 @@ async function enrichCycle() {
     } catch (e) {
       await failOrRetry(item, token, "pending", e);
     }
+  };
+
+  // Concurrent runners pull from a shared cursor; on shutdown, whatever no runner has
+  // started goes straight back to pending (started items finish and release themselves).
+  let cursor = 0;
+  const untaken = new Set(items.map((_, i) => i));
+  await Promise.all(
+    Array.from({ length: Math.min(ENRICH_CONCURRENCY, items.length) }, async () => {
+      for (;;) {
+        if (shuttingDown) break;
+        const i = cursor++;
+        if (i >= items.length) break;
+        untaken.delete(i);
+        await processOne(items[i]);
+      }
+    })
+  );
+  if (shuttingDown && untaken.size) {
+    await releaseItems(items.filter((_, i) => untaken.has(i)), token, "pending");
   }
   return true;
 }
