@@ -287,7 +287,7 @@ function MlsSection({
             }
             className={
               mlsCount.buckets.includes(b)
-                ? "rounded-full border border-neutral-900 bg-neutral-900 px-2.5 py-0.5 text-xs text-white"
+                ? "rounded-full border border-brand bg-brand px-2.5 py-0.5 text-xs text-white"
                 : "rounded-full border border-neutral-300 px-2.5 py-0.5 text-xs text-neutral-700 hover:border-neutral-400"
             }
           >

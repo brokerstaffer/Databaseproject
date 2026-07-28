@@ -43,7 +43,7 @@ export function FilterPopoverShell({
             "inline-flex items-center gap-1 rounded-md px-2.5 py-1.5 text-sm font-medium transition-colors",
             // Active filters get a clear filled + ringed treatment so they stand out at a glance.
             count > 0
-              ? "bg-neutral-900 text-white ring-2 ring-neutral-900/20"
+              ? "bg-brand text-white ring-2 ring-brand/20"
               : "text-neutral-700 hover:bg-neutral-200"
           )}
         >
@@ -63,7 +63,7 @@ export function FilterPopoverShell({
           <button
             type="button"
             onClick={onApply}
-            className="rounded-lg bg-neutral-900 px-5 py-2 text-sm font-medium text-white hover:bg-neutral-800"
+            className="rounded-lg bg-brand px-5 py-2 text-sm font-medium text-white hover:bg-brand/90"
           >
             Apply
           </button>

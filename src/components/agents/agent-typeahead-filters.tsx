@@ -639,7 +639,7 @@ export function MlsPopover({
             onClick={() => setCountSel((s) => (s.includes(b) ? s.filter((x) => x !== b) : [...s, b]))}
             className={cn(
               "rounded-full border px-2.5 py-0.5 text-xs",
-              countSel.includes(b) ? "border-neutral-900 bg-neutral-900 text-white" : "border-neutral-300 text-neutral-700 hover:border-neutral-400"
+              countSel.includes(b) ? "border-neutral-900 bg-brand text-white" : "border-neutral-300 text-neutral-700 hover:border-neutral-400"
             )}
           >
             {b}

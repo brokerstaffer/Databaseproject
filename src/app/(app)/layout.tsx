@@ -40,7 +40,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <div className="flex min-h-0 flex-1">
         <SidebarNav role={role} />
         <RoleProvider role={role}>
-          <main className="flex-1 overflow-auto bg-neutral-100 p-5">{children}</main>
+          <main className="flex-1 overflow-auto bg-[#f6f7f9] p-5">{children}</main>
         </RoleProvider>
       </div>
     </div>

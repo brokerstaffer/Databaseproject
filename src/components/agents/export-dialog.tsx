@@ -314,7 +314,7 @@ export function ExportDialog({
                   onClick={() => setMethod(m)}
                   className={cn(
                     "rounded-lg border px-3 py-2 text-sm font-medium transition-colors",
-                    method === m ? "border-neutral-900 bg-neutral-900 text-white" : "border-neutral-300 text-neutral-700 hover:bg-neutral-50"
+                    method === m ? "border-neutral-900 bg-brand text-white" : "border-neutral-300 text-neutral-700 hover:bg-neutral-50"
                   )}
                 >
                   {lbl}
@@ -417,7 +417,7 @@ export function ExportDialog({
                       onClick={() => setSourcePriority(s)}
                       className={cn(
                         "rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors",
-                        sourcePriority === s ? "border-neutral-900 bg-neutral-900 text-white" : "border-neutral-300 text-neutral-700 hover:bg-neutral-50"
+                        sourcePriority === s ? "border-neutral-900 bg-brand text-white" : "border-neutral-300 text-neutral-700 hover:bg-neutral-50"
                       )}
                     >
                       {lbl}
@@ -466,7 +466,7 @@ export function ExportDialog({
                       onClick={() => setPortalTarget(t)}
                       className={cn(
                         "rounded-lg border px-3 py-2 text-sm font-medium transition-colors",
-                        portalTarget === t ? "border-neutral-900 bg-neutral-900 text-white" : "border-neutral-300 text-neutral-700 hover:bg-neutral-50"
+                        portalTarget === t ? "border-neutral-900 bg-brand text-white" : "border-neutral-300 text-neutral-700 hover:bg-neutral-50"
                       )}
                     >
                       {lbl}

@@ -52,7 +52,7 @@
 :root {
   --radius: 0.625rem;
   /* Courted accent blue (used for selected pills, save icon, focus) — tuned during UI iteration */
-  --brand: oklch(0.546 0.215 262.88);
+  --brand: #1565C0; /* BrokerStaffer portal accent */
   --brand-foreground: oklch(0.985 0 0);
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
@@ -60,7 +60,7 @@
   --card-foreground: oklch(0.145 0 0);
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
+  --primary: #1565C0; /* BrokerStaffer portal accent */
   --primary-foreground: oklch(0.985 0 0);
   --secondary: oklch(0.97 0 0);
   --secondary-foreground: oklch(0.205 0 0);

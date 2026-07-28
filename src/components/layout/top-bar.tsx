@@ -64,10 +64,10 @@ export function TopBar({ initials, email }: { initials: string; email: string })
   }
 
   return (
-    <header className="flex h-14 shrink-0 items-center gap-3 bg-neutral-950 px-3 text-white">
-      <Link href="/search" className="flex h-9 w-9 items-center justify-center rounded-md bg-white" title="BrokerStaffer">
+    <header className="flex h-14 shrink-0 items-center gap-3 border-b border-[#ebecf0] bg-white/85 px-3 text-neutral-900 backdrop-blur-md">
+      <Link href="/search" className="flex h-9 items-center gap-2 rounded-md px-1" title="BrokerStaffer">
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src="/logo-badge.svg" alt="BrokerStaffer" className="h-6 w-6" />
+        <img src="/logo.svg" alt="BrokerStaffer" className="h-7 w-auto" />
       </Link>
       <form
         className="relative w-full max-w-sm"
@@ -84,7 +84,7 @@ export function TopBar({ initials, email }: { initials: string; email: string })
           onFocus={() => setFocus(true)}
           onBlur={() => setTimeout(() => setFocus(false), 120)}
           placeholder="Search agents by name…"
-          className="h-9 w-full rounded-lg bg-neutral-800/80 pl-9 pr-3 text-sm text-white placeholder:text-neutral-400 focus:outline-none focus:ring-1 focus:ring-neutral-600"
+          className="h-9 w-full rounded-lg border border-neutral-200 bg-[#f6f7f9] pl-9 pr-3 text-sm text-neutral-900 placeholder:text-neutral-400 focus:border-brand/50 focus:outline-none focus:ring-1 focus:ring-brand/30"
         />
         {focus && q.trim().length > 0 && options.length > 0 && (
           <div className="absolute z-50 mt-1 max-h-72 w-full overflow-auto rounded-lg border border-neutral-200 bg-white py-1 text-neutral-900 shadow-lg">
@@ -107,15 +107,15 @@ export function TopBar({ initials, email }: { initials: string; email: string })
         )}
       </form>
       <div className="ml-auto flex items-center gap-4">
-        <button type="button" className="text-neutral-300 hover:text-white" title="Lists">
+        <button type="button" className="text-neutral-400 hover:text-neutral-900" title="Lists">
           <ClipboardList className="h-5 w-5" />
         </button>
-        <button type="button" className="text-neutral-300 hover:text-white" title="Notifications">
+        <button type="button" className="text-neutral-400 hover:text-neutral-900" title="Notifications">
           <Bell className="h-5 w-5" />
         </button>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <button className="flex h-8 w-8 items-center justify-center rounded-full bg-neutral-600 text-xs font-semibold text-white">
+            <button className="flex h-8 w-8 items-center justify-center rounded-full bg-brand text-xs font-semibold text-white">
               {initials}
             </button>
           </DropdownMenuTrigger>

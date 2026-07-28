@@ -485,7 +485,7 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
                   setSortBy("sales_volume");
                   setSortDir("desc");
                 }}
-                className={`rounded-md px-3 py-1 font-medium transition-colors ${mode === m ? "bg-neutral-900 text-white" : "text-neutral-600 hover:text-neutral-900"}`}
+                className={`rounded-md px-3 py-1 font-medium transition-colors ${mode === m ? "bg-brand text-white" : "text-neutral-600 hover:text-neutral-900"}`}
               >
                 {m === "agent" ? "Agent" : m === "office" ? "Office" : "Brand"}
               </button>
@@ -502,7 +502,7 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
                   setPage(1);
                   setSelected(new Set());
                 }}
-                className={`rounded-md px-3 py-1 font-medium transition-colors ${source === s ? "bg-neutral-900 text-white" : "text-neutral-600 hover:text-neutral-900"}`}
+                className={`rounded-md px-3 py-1 font-medium transition-colors ${source === s ? "bg-brand text-white" : "text-neutral-600 hover:text-neutral-900"}`}
               >
                 {lbl}
               </button>
