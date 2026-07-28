@@ -517,7 +517,12 @@ export function ClientPopover({
 }
 
 // ---------- Contact (has / missing per channel — A3's include/exclude model) ----------
-export type ContactValue = { email: "" | "has" | "missing"; phone: "" | "has" | "missing" };
+export type ContactValue = {
+  email: "" | "has" | "missing";
+  phone: "" | "has" | "missing";
+  enriched: "" | "has" | "missing"; // C2: went through enrichment and holds a verified email
+  inCampaign: "" | "has" | "missing"; // C5: already in a client's Bison campaign
+};
 export function ContactPopover({ value, onChange }: { value: ContactValue; onChange: (v: ContactValue) => void }) {
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState(value);
@@ -526,12 +531,18 @@ export function ContactPopover({ value, onChange }: { value: ContactValue; onCha
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
-  const count = (value.email ? 1 : 0) + (value.phone ? 1 : 0);
-  const row = (k: "email" | "phone", label: string) => (
+  const count = (value.email ? 1 : 0) + (value.phone ? 1 : 0) + (value.enriched ? 1 : 0) + (value.inCampaign ? 1 : 0);
+  const LABELS: Record<string, [string, string]> = {
+    email: ["Has email", "No email"],
+    phone: ["Has phone", "No phone"],
+    enriched: ["Enriched", "Not enriched"],
+    inCampaign: ["In campaign", "Not in campaign"],
+  };
+  const row = (k: "email" | "phone" | "enriched" | "inCampaign", label: string) => (
     <div>
       <div className="mb-1.5 text-xs font-medium text-neutral-500">{label}</div>
       <div className="flex items-center gap-5">
-        {([["", "Any"], ["has", `Has ${k}`], ["missing", `No ${k}`]] as const).map(([v, lbl]) => (
+        {([["", "Any"], ["has", LABELS[k][0]], ["missing", LABELS[k][1]]] as const).map(([v, lbl]) => (
           <Radio key={v || "any"} label={lbl} on={draft[k] === v} onClick={() => setDraft({ ...draft, [k]: v })} />
         ))}
       </div>
@@ -545,8 +556,8 @@ export function ContactPopover({ value, onChange }: { value: ContactValue; onCha
       onOpenChange={setOpen}
       width="w-80"
       onClear={() => {
-        setDraft({ email: "", phone: "" });
-        onChange({ email: "", phone: "" }); // Clear applies immediately (A4)
+        setDraft({ email: "", phone: "", enriched: "", inCampaign: "" });
+        onChange({ email: "", phone: "", enriched: "", inCampaign: "" }); // Clear applies immediately (A4)
       }}
       onApply={() => {
         onChange(draft);
@@ -556,6 +567,8 @@ export function ContactPopover({ value, onChange }: { value: ContactValue; onCha
       <div className="space-y-3.5">
         {row("email", "Email address")}
         {row("phone", "Phone number")}
+        {row("enriched", "Verified / enriched (C2)")}
+        {row("inCampaign", "In a client campaign (C5)")}
       </div>
     </FilterPopoverShell>
   );

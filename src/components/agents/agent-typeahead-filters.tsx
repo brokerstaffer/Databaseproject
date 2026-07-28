@@ -679,8 +679,10 @@ export function MlsPopover({
         {items.length === 0 ? (
           <div className="px-1 py-2 text-sm text-neutral-400">No MLS found.</div>
         ) : (
-          items.map((m) => (
-            <label key={m.id} className="flex items-center gap-2 rounded px-1 py-1.5 text-sm text-neutral-800 hover:bg-neutral-50">
+          [...items]
+            .sort((x, y) => (sel.includes(y.id) ? 1 : 0) - (sel.includes(x.id) ? 1 : 0))
+            .map((m) => (
+            <label key={m.id} className={cn("flex items-center gap-2 rounded px-1 py-1.5 text-sm hover:bg-neutral-50", sel.includes(m.id) ? "bg-blue-50 font-medium text-blue-700" : "text-neutral-800")}>
               <Checkbox checked={sel.includes(m.id)} onCheckedChange={() => toggle(m.id)} />
               <span className="truncate">
                 {m.name ?? m.code}

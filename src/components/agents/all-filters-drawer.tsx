@@ -308,8 +308,10 @@ function MlsSection({
         {items.length === 0 ? (
           <div className="px-1 py-2 text-sm text-neutral-400">No MLS found.</div>
         ) : (
-          items.map((m) => (
-            <label key={m.id} className="flex items-center gap-2 rounded px-1 py-1.5 text-sm text-neutral-800 hover:bg-neutral-50">
+          [...items]
+            .sort((x, y) => (value.include.includes(y.id) ? 1 : 0) - (value.include.includes(x.id) ? 1 : 0))
+            .map((m) => (
+            <label key={m.id} className={"flex items-center gap-2 rounded px-1 py-1.5 text-sm hover:bg-neutral-50 " + (value.include.includes(m.id) ? "bg-blue-50 font-medium text-blue-700" : "text-neutral-800")}>
               <Checkbox checked={value.include.includes(m.id)} onCheckedChange={() => toggle(m.id)} />
               <span className="truncate">
                 {m.name ?? m.code}

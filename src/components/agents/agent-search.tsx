@@ -179,6 +179,19 @@ const COLUMNS: Col[] = [
   { key: "avgVolAT", label: "Avg. sales volume (all time)", sortBy: "avg_sales_volume_all_time", align: "right", render: (a) => usd(a.avg_sales_volume_all_time as number | null) },
   { key: "priceRange", label: "Price range", render: (a) => na(a.price_range as string | null) },
   { key: "otherLic", label: "Other licenses", render: (a) => na(a.other_licenses as string | null) },
+  {
+    key: "enriched",
+    label: "Enriched",
+    render: (a) =>
+      a.enriched_at ? (
+        <span className="text-green-700">
+          ✓ {String(a.enriched_email_status ?? "enriched")} · {new Date(String(a.enriched_at)).toLocaleDateString()}
+        </span>
+      ) : (
+        <span className="text-neutral-400">—</span>
+      ),
+  },
+  { key: "inCampaign", label: "Client campaign", render: (a) => (a.client_campaigns ? capped(String(a.client_campaigns)) : <span className="text-neutral-400">—</span>) },
 ];
 
 const DEFAULT_COL_ORDER = COLUMNS.map((c) => c.key);

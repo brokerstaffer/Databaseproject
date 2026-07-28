@@ -2,6 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { toast } from "sonner";
 
 // A5: agent profile — identity, combined production, then one section per MLS with that
 // MLS's own numbers. Per-MLS figures fill in as the 15-day refresh cycles land; until an
@@ -27,7 +30,10 @@ interface MlsRow {
   stats_as_of: string | null;
 }
 interface Profile {
-  agent: Record<string, string | number | null> & { full_name: string | null };
+  agent: Record<string, string | number | null> & {
+    full_name: string | null;
+    agent_provided?: { email?: string; phone?: string; added_by?: string; added_at?: string } | null;
+  };
   mls: MlsRow[];
   sources: { source: string; sales_volume: string | null; units: string | null; scraped: string | null }[];
 }
@@ -68,11 +74,19 @@ function StatGridInner({ s }: { s: { [k: string]: string | number | null | undef
 export function AgentProfileDialog({ agentId, onClose }: { agentId: string | null; onClose: () => void }) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [editOpen, setEditOpen] = useState(false);
+  const [newEmail, setNewEmail] = useState("");
+  const [newPhone, setNewPhone] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     if (!agentId) return;
     setProfile(null);
     setError(null);
+    setEditOpen(false);
+    setNewEmail("");
+    setNewPhone("");
     let active = true;
     fetch(`/api/agents/profile?id=${agentId}`)
       .then((r) => r.json())
@@ -85,7 +99,26 @@ export function AgentProfileDialog({ agentId, onClose }: { agentId: string | nul
     return () => {
       active = false;
     };
-  }, [agentId]);
+  }, [agentId, reloadKey]);
+
+  async function saveProvided() {
+    if (saving || (!newEmail.trim() && !newPhone.trim())) return;
+    setSaving(true);
+    const res = await fetch("/api/agents/profile", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: agentId, email: newEmail, phone: newPhone }),
+    });
+    const j = await res.json().catch(() => ({}));
+    setSaving(false);
+    if (!res.ok) {
+      toast.error(j.error ?? "Failed to save");
+      return;
+    }
+    toast.success("Contact info added — campaign sends will prefer it");
+    setEditOpen(false);
+    setReloadKey((k) => k + 1);
+  }
 
   const a = profile?.agent;
   const multi = (profile?.mls.length ?? 0) > 1;
@@ -109,6 +142,39 @@ export function AgentProfileDialog({ agentId, onClose }: { agentId: string | nul
               <div className="truncate text-neutral-600">{[a.brand, a.office_name].filter(Boolean).join(" — ") || "No office on file"}</div>
               <div className="truncate text-neutral-600">{String(a.enriched_email ?? a.preferred_email ?? "No email")}</div>
               <div className="text-neutral-600">{String(a.preferred_phone ?? "No phone")}</div>
+            </div>
+
+            {/* C3: contact info the agent provided directly — never overwrites, always wins on sends */}
+            <div className="rounded-xl border border-neutral-200 p-3">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-semibold text-neutral-900">Provided by agent</span>
+                <button type="button" className="text-xs text-blue-700 hover:underline" onClick={() => setEditOpen((v) => !v)}>
+                  {editOpen ? "Cancel" : "Add contact info"}
+                </button>
+              </div>
+              {a.agent_provided?.email || a.agent_provided?.phone ? (
+                <div className="mt-1 text-sm text-neutral-700">
+                  {a.agent_provided.email && <div className="truncate">{a.agent_provided.email}</div>}
+                  {a.agent_provided.phone && <div>{a.agent_provided.phone}</div>}
+                  <div className="mt-0.5 text-[11px] text-neutral-400">
+                    added {a.agent_provided.added_at ? new Date(a.agent_provided.added_at).toLocaleDateString() : ""}
+                    {a.agent_provided.added_by ? ` by ${a.agent_provided.added_by}` : ""} · campaign sends prefer these
+                  </div>
+                </div>
+              ) : (
+                !editOpen && <p className="mt-1 text-xs text-neutral-400">None yet — add an email/phone the agent gave you (existing values are kept).</p>
+              )}
+              {editOpen && (
+                <div className="mt-2 space-y-2">
+                  <Input placeholder="New email (optional)" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} />
+                  <Input placeholder="New phone (optional)" value={newPhone} onChange={(e) => setNewPhone(e.target.value)} />
+                  <div className="flex justify-end">
+                    <Button size="sm" onClick={saveProvided} disabled={saving || (!newEmail.trim() && !newPhone.trim())}>
+                      {saving ? "Saving…" : "Save"}
+                    </Button>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="rounded-xl border border-neutral-200 p-3">

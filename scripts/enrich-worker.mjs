@@ -195,10 +195,11 @@ async function leadBlockedForCampaign(lead, targetCampaignId) {
 // office_name/profile_url) and agent_source_stats; older courted rows predate the stash,
 // so 'courted' falls back to the canonical columns (which are courted-authoritative).
 // ---------------------------------------------------------------------------
+// agent_provided = contact info the agent gave us directly (C3) — always wins.
 const PRIORITY_ORDERS = {
-  courted: ["courted", "zillow", "realtor"],
-  zillow: ["zillow", "courted", "realtor"],
-  realtor: ["realtor", "courted", "zillow"],
+  courted: ["agent_provided", "courted", "zillow", "realtor"],
+  zillow: ["agent_provided", "zillow", "courted", "realtor"],
+  realtor: ["agent_provided", "realtor", "courted", "zillow"],
 };
 const orderFor = (priority) => PRIORITY_ORDERS[priority] ?? PRIORITY_ORDERS.courted;
 

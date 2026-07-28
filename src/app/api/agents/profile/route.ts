@@ -23,6 +23,7 @@ export async function GET(req: NextRequest) {
     pool.query(
       `select id, full_name, first_name, last_name, license_number, title, brand, office_name,
               preferred_email, enriched_email, preferred_phone, linkedin_url,
+              source_ids->'agent_provided' as agent_provided,
               home_city, home_state, home_zip, office_city, office_state, office_zip,
               most_transacted_city, est_time_in_industry_raw, est_time_in_industry_months,
               sales_volume, pct_change, buy_side_dollar, list_side_dollar, approx_gci,
@@ -54,4 +55,47 @@ export async function GET(req: NextRequest) {
   ]);
   if (agentQ.rows.length === 0) return NextResponse.json({ error: "not found" }, { status: 404 });
   return NextResponse.json({ agent: agentQ.rows[0], mls: mlsQ.rows, sources: sourceQ.rows });
+}
+
+// C3: add contact info the agent provided directly (e.g. replied in MasterInbox with a new
+// number). NEVER overwrites existing values — stored as its own 'agent_provided' source,
+// which campaign sends prefer over every scraped/enriched value.
+export async function PATCH(req: NextRequest) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+
+  const body = await req.json().catch(() => ({}));
+  const id = typeof body.id === "string" ? body.id : "";
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+    return NextResponse.json({ error: "bad id" }, { status: 400 });
+  }
+  const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
+  const phone = typeof body.phone === "string" ? body.phone.trim() : "";
+  if (!email && !phone) return NextResponse.json({ error: "Provide an email or a phone number" }, { status: 400 });
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return NextResponse.json({ error: "That email doesn't look valid" }, { status: 400 });
+  }
+
+  const provided: Record<string, string> = { added_by: user.email ?? user.id, added_at: new Date().toISOString() };
+  if (email) provided.email = email;
+  if (phone) provided.phone = phone;
+
+  const pool = getPool();
+  const { rowCount } = await pool.query(
+    `update agents
+        set source_ids = coalesce(source_ids, '{}'::jsonb)
+              || jsonb_build_object('agent_provided', coalesce(source_ids->'agent_provided', '{}'::jsonb) || $2::jsonb),
+            updated_at = now()
+      where id = $1`,
+    [id, JSON.stringify(provided)]
+  );
+  if (!rowCount) return NextResponse.json({ error: "not found" }, { status: 404 });
+  await pool.query(`insert into audit_logs (action, performed_by, details) values ('agent_contact_added', $1, $2)`, [
+    user.email ?? user.id,
+    `Agent ${id}: added agent-provided ${[email && "email", phone && "phone"].filter(Boolean).join(" + ")}`,
+  ]);
+  return NextResponse.json({ ok: true, agent_provided: provided });
 }

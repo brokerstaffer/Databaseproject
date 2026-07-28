@@ -56,6 +56,10 @@ export interface Agent {
   agent_count?: number | null;
   office_count?: number | null; // brand mode (B5): offices under the brand
   mls_scoped?: boolean; // A5: production numbers on this row are scoped to the selected MLS(s)
+  enriched_email?: string | null;
+  enriched_email_status?: string | null;
+  enriched_at?: string | null; // when the enrichment pipeline last processed this agent (C2)
+  client_campaigns?: string | null; // client names whose Bison campaigns hold this agent (C5)
   [key: string]: unknown;
 }
 
