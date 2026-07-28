@@ -55,6 +55,7 @@ export interface Agent {
   agent_names?: string[] | null;
   agent_count?: number | null;
   office_count?: number | null; // brand mode (B5): offices under the brand
+  mls_scoped?: boolean; // A5: production numbers on this row are scoped to the selected MLS(s)
   [key: string]: unknown;
 }
 

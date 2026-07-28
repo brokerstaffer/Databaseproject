@@ -528,6 +528,9 @@ export async function upsertAgentRows(client: PoolClient, rows: Row[], source: s
          on conflict (agent_id, mls_id) do update set ${STAT_COLS.map(([n]) => `${n} = excluded.${n}`).join(", ")}, scraped_at = now()`,
         [JSON.stringify(mlsStatRows)]
       );
+      // A5 rollup (client-approved): agents.* becomes the sum across MLSs — but only for
+      // agents whose EVERY membership now has a stats row, so figures never dip mid-fill.
+      await client.query(`select fn_rollup_agent_stats($1::uuid[])`, [stats.agentIds]);
     }
 
     // ---- 8) junctions ----

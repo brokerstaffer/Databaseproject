@@ -50,13 +50,30 @@ export async function POST(req: NextRequest) {
   if (agentIds.length === 0) return NextResponse.json({ error: "No agents to send." }, { status: 400 });
 
   const pool = getPool();
+
+  // A5 scoped sends: if the search was MLS-scoped (selected MLSs with near-complete per-MLS
+  // stats coverage — the same gate the search engine uses), stamp the scope on the batch so
+  // the worker pushes THAT MLS's numbers as the campaign variables.
+  let mlsScope: string[] | null = null;
+  const mlsInclude = Array.isArray((f?.mls as { include?: unknown })?.include)
+    ? ((f.mls as { include: unknown[] }).include.filter((x) => typeof x === "string") as string[])
+    : [];
+  if (mlsInclude.length) {
+    const gate = await pool.query(
+      `select coalesce(bool_and(coalesce(stats_agents, 0)::numeric >= 0.9 * greatest(coalesce(member_agents, 0), 1)), false) as ok
+         from mls where id = any($1::uuid[])`,
+      [mlsInclude]
+    );
+    if (gate.rows[0]?.ok) mlsScope = mlsInclude;
+  }
+
   const dbc = await pool.connect();
   let batchId: string;
   try {
     await dbc.query("begin");
     const batch = await dbc.query(
-      `insert into enrichment_batches (client_id, orch_client_id, campaign_id, campaign_ids, campaign_name, total, created_by, filters, source_priority)
-       values ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9) returning id`,
+      `insert into enrichment_batches (client_id, orch_client_id, campaign_id, campaign_ids, campaign_name, total, created_by, filters, source_priority, mls_scope)
+       values ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10::uuid[]) returning id`,
       [
         clientId,
         orchClientIdForBatch,
@@ -67,6 +84,7 @@ export async function POST(req: NextRequest) {
         user.id,
         JSON.stringify({ filters, mode, source, selectedCount: Array.isArray(selectedIds) ? selectedIds.length : 0, rangeFrom: rangeFrom ?? null, rangeTo: rangeTo ?? null }),
         sourcePriority,
+        mlsScope,
       ]
     );
     batchId = batch.rows[0].id;

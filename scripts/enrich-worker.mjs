@@ -563,7 +563,7 @@ async function pushCycle() {
   if (items.length === 0) return false;
   const agents = await loadAgents(items.map((i) => i.agent_id));
   const { rows: batches } = await pool.query(
-    `select b.id, b.campaign_id, b.campaign_ids, b.status, b.source_priority
+    `select b.id, b.campaign_id, b.campaign_ids, b.status, b.source_priority, b.mls_scope
        from enrichment_batches b where b.id = any($1::uuid[])`,
     [[...new Set(items.map((i) => i.batch_id))]]
   );
@@ -572,6 +572,26 @@ async function pushCycle() {
   const toAttach = new Map();      // campaign_id -> [{ item, leadId }]
   const targetsByItem = new Map(); // item.id -> how many campaigns we will attach it to
   const itemById = new Map();      // item.id -> item (for finalize)
+
+  // A5 scoped sends: a batch created from an MLS-scoped search carries mls_scope — its
+  // personalization variables must be THAT MLS's numbers, not the all-MLS totals.
+  const scopedByBatch = new Map(); // batch_id -> Map(agent_id -> scoped sums + codes)
+  for (const b of batches) {
+    if (!b.mls_scope?.length) continue;
+    const ids = [...new Set(items.filter((i) => i.batch_id === b.id).map((i) => i.agent_id))];
+    if (!ids.length) continue;
+    const { rows: sc } = await pool.query(
+      `select s.agent_id, sum(s.sales_volume) as sales_volume, sum(s.buy_side_dollar) as buy_side_dollar,
+              sum(s.list_side_dollar) as list_side_dollar, sum(s.approx_gci) as approx_gci,
+              sum(s.closed_transactions) as closed_transactions, sum(s.closed_rentals) as closed_rentals,
+              case when sum(s.units) > 0 then sum(coalesce(s.avg_sale_price, 0) * coalesce(s.units, 0)) / sum(s.units) end as avg_sale_price,
+              (select string_agg(m2.code, ' | ' order by m2.code) from agent_mls am2 join mls m2 on m2.id = am2.mls_id
+                where am2.agent_id = s.agent_id and am2.mls_id = any($2::uuid[])) as mls_codes
+         from agent_mls_stats s where s.agent_id = any($1::uuid[]) and s.mls_id = any($2::uuid[]) group by s.agent_id`,
+      [ids, b.mls_scope]
+    );
+    scopedByBatch.set(b.id, new Map(sc.map((r) => [r.agent_id, r])));
+  }
 
   for (let n = 0; n < items.length; n++) {
     const item = items[n];
@@ -593,7 +613,14 @@ async function pushCycle() {
     const chosen = (batch.campaign_ids?.length ? batch.campaign_ids : [batch.campaign_id]).filter(Boolean).map(String);
     const chosenSet = new Set(chosen);
     try {
-      const payload = mapAgentToBisonLead(agent, item.email, agent.mls_code, orderFor(batch.source_priority));
+      const sc = scopedByBatch.get(item.batch_id)?.get(item.agent_id);
+      const payloadAgent = sc
+        ? { ...agent, sales_volume: sc.sales_volume, buy_side_dollar: sc.buy_side_dollar,
+            list_side_dollar: sc.list_side_dollar, approx_gci: sc.approx_gci,
+            avg_sale_price: sc.avg_sale_price, closed_rentals: sc.closed_rentals,
+            closed_transactions: sc.closed_transactions, stats_by_source: null }
+        : agent;
+      const payload = mapAgentToBisonLead(payloadAgent, item.email, sc ? sc.mls_codes : agent.mls_code, orderFor(batch.source_priority));
       // Does this lead already exist in the workspace? (also our per-client dedup source)
       const existing = await findBisonLeadByEmail(item.email);
 

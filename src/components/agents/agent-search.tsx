@@ -580,6 +580,11 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
                 <span className="px-2 text-neutral-300">•</span>
                 <span className="font-semibold text-neutral-900">{usdShort(vol)}</span>
                 <span className="text-neutral-500"> Sales volume</span>
+                {mode === "agent" && rows[0]?.mls_scoped === true && (
+                  <span className="ml-3 rounded-md bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700" title="Production columns show only the selected MLS's numbers (A5)">
+                    Numbers scoped to selected MLS
+                  </span>
+                )}
                 {mode === "brand" && (
                   <label className="ml-4 inline-flex items-center gap-1.5 text-xs text-neutral-600">
                     <Checkbox
