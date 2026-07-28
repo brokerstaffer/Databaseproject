@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
-import { Search, ClipboardList, Bell, LogOut } from "lucide-react";
+import { Search, LogOut } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -107,12 +107,6 @@ export function TopBar({ initials, email }: { initials: string; email: string })
         )}
       </form>
       <div className="ml-auto flex items-center gap-4">
-        <button type="button" className="text-neutral-400 hover:text-neutral-900" title="Lists">
-          <ClipboardList className="h-5 w-5" />
-        </button>
-        <button type="button" className="text-neutral-400 hover:text-neutral-900" title="Notifications">
-          <Bell className="h-5 w-5" />
-        </button>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button className="flex h-8 w-8 items-center justify-center rounded-full bg-brand text-xs font-semibold text-white">

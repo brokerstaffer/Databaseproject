@@ -29,11 +29,11 @@ export function SidebarNav({ role }: { role: UserRole }) {
   const itemClass = (active: boolean) =>
     cn(
       "flex h-10 w-10 items-center justify-center rounded-lg transition-colors",
-      active ? "bg-neutral-800 text-white" : "text-neutral-400 hover:bg-neutral-900 hover:text-white"
+      active ? "bg-brand/10 text-brand" : "text-neutral-400 hover:bg-neutral-100 hover:text-neutral-900"
     );
 
   return (
-    <aside className="flex w-16 shrink-0 flex-col items-center gap-1.5 border-r border-neutral-800 bg-neutral-950 py-3">
+    <aside className="flex w-16 shrink-0 flex-col items-center gap-1.5 border-r border-[#ebecf0] bg-white py-3">
       {NAV.filter((i) => hasPermission(role, i.minRole)).map((item) => {
         const active = pathname.startsWith(item.href);
         return (
