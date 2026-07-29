@@ -531,7 +531,7 @@ export function ContactPopover({ value, onChange }: { value: ContactValue; onCha
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
-  const count = (value.email ? 1 : 0) + (value.phone ? 1 : 0) + (value.enriched ? 1 : 0) + (value.inCampaign ? 1 : 0);
+  const count = (value.email ? 1 : 0) + (value.phone ? 1 : 0); // enriched/inCampaign live in the All-filters drawer
   const LABELS: Record<string, [string, string]> = {
     email: ["Has email", "No email"],
     phone: ["Has phone", "No phone"],
@@ -556,8 +556,8 @@ export function ContactPopover({ value, onChange }: { value: ContactValue; onCha
       onOpenChange={setOpen}
       width="w-80"
       onClear={() => {
-        setDraft({ email: "", phone: "", enriched: "", inCampaign: "" });
-        onChange({ email: "", phone: "", enriched: "", inCampaign: "" }); // Clear applies immediately (A4)
+        setDraft({ ...value, email: "", phone: "" });
+        onChange({ ...value, email: "", phone: "" }); // Clear applies immediately (A4); drawer-owned toggles stay
       }}
       onApply={() => {
         onChange(draft);
@@ -567,8 +567,6 @@ export function ContactPopover({ value, onChange }: { value: ContactValue; onCha
       <div className="space-y-3.5">
         {row("email", "Email address")}
         {row("phone", "Phone number")}
-        {row("enriched", "Verified / enriched (C2)")}
-        {row("inCampaign", "In a client campaign (C5)")}
       </div>
     </FilterPopoverShell>
   );

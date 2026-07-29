@@ -227,6 +227,26 @@ interface MlsItem {
   name: string | null;
   updated?: string | null; // per-MLS bulk-refresh date (A8)
 }
+
+function EnrichmentSection({ value, onChange }: { value: Filters["contact"]; onChange: (v: Filters["contact"]) => void }) {
+  const row = (k: "enriched" | "inCampaign", title: string, hasLbl: string, noLbl: string) => (
+    <div className="mb-3 last:mb-0">
+      <div className="mb-1.5 text-xs font-medium text-neutral-500">{title}</div>
+      <div className="flex items-center gap-6">
+        {([["", "Any"], ["has", hasLbl], ["missing", noLbl]] as const).map(([v, lbl]) => (
+          <RadioOpt key={v || "any"} label={lbl} on={value[k] === v} onClick={() => onChange({ ...value, [k]: v })} />
+        ))}
+      </div>
+    </div>
+  );
+  return (
+    <Section title="Enrichment & campaigns" count={(value.enriched ? 1 : 0) + (value.inCampaign ? 1 : 0)}>
+      {row("enriched", "Verified / enriched", "Enriched", "Not enriched")}
+      {row("inCampaign", "In a client campaign", "In campaign", "Not in campaign")}
+    </Section>
+  );
+}
+
 const MLS_COUNT_BUCKETS = ["2", "3", "4", "5", "6+"]; // B3 — mirrors the popover
 function MlsSection({
   value,
@@ -483,6 +503,7 @@ export function AllFiltersDrawer({
           <RangeSection title="Average sales price" count={rangeCount(draft.avgSalePrice)} value={draft.avgSalePrice} onChange={(v) => set("avgSalePrice", v as RangeF)} buckets={[]} prefix="$" />
           <RangeSection title="Est. time in office" count={rangeCount(draft.estTimeInOffice)} value={draft.estTimeInOffice} onChange={(v) => set("estTimeInOffice", v as RangeF)} buckets={YEAR_BUCKETS} suffix="yrs" />
           <RangeSection title="Average time at office" count={rangeCount(draft.avgTimeAtOffice)} value={draft.avgTimeAtOffice} onChange={(v) => set("avgTimeAtOffice", v as RangeF)} buckets={YEAR_BUCKETS} suffix="yrs" />
+          <EnrichmentSection value={draft.contact} onChange={(v) => set("contact", v)} />
         </div>
         <SheetFooter className="flex-row items-center justify-between border-t border-neutral-200">
           <button
