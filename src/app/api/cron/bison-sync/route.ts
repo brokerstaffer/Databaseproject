@@ -186,10 +186,38 @@ async function runLeadSync(pool: any, key: string, base: string) {
       "delete from bison_client_leads where campaign_id <> all($1::text[])", [liveIds]
     );
 
+    // C4: which leads have EVER replied — one paginated sweep of the workspace-global
+    // replied filter (~28 pages for ~2.8k leads), then flag our mirrored rows.
+    let repliedTotal = 0;
+    try {
+      const repliedEmails: string[] = [];
+      for (let page = 1; page <= 500; page++) {
+        const res = await fetch(
+          `${base.replace(/\/+$/, "")}/leads?filters[lead_campaign_status]=replied&pagination_type=length_aware&per_page=100&page=${page}`,
+          { headers: { Authorization: `Bearer ${key}`, Accept: "application/json" }, signal: AbortSignal.timeout(30000) }
+        );
+        if (!res.ok) throw new Error(`replied sweep ${res.status}`);
+        const j = await res.json();
+        const data: { email?: string }[] = Array.isArray(j?.data) ? j.data : [];
+        for (const l of data) {
+          const e = String(l.email ?? "").trim().toLowerCase();
+          if (e.includes("@")) repliedEmails.push(e);
+        }
+        const lastPage = j?.meta?.last_page as number | undefined;
+        if (data.length === 0 || (lastPage && page >= lastPage)) break;
+        if (!lastPage && data.length >= 100) throw new Error("replied sweep: pagination shape unknown");
+      }
+      repliedTotal = repliedEmails.length;
+      await pool.query("update bison_client_leads set replied = (email = any($1::text[])) where replied is distinct from (email = any($1::text[]))", [repliedEmails]);
+    } catch (e) {
+      warnings.push(`replied sweep failed: ${e instanceof Error ? e.message : "error"}`);
+    }
+
     const summary = {
       campaignsSynced,
       leads: leadsTotal,
       matched: matchedTotal,
+      replied: repliedTotal,
       errors,
       warnings,
       unmappedClientLike,

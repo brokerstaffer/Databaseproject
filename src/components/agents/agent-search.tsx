@@ -193,6 +193,7 @@ const COLUMNS: Col[] = [
       ),
   },
   { key: "inCampaign", label: "Client campaign", render: (a) => (a.client_campaigns ? capped(String(a.client_campaigns)) : <span className="text-neutral-400">—</span>) },
+  { key: "replied", label: "Replied", render: (a) => (a.has_replied ? <span className="text-green-700">✓ replied</span> : <span className="text-neutral-400">—</span>) },
 ];
 
 const DEFAULT_COL_ORDER = COLUMNS.map((c) => c.key);
