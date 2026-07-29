@@ -48,9 +48,11 @@ function Section({ title, count, children }: { title: string; count?: number; ch
 
 // ---------- sections ----------
 function LocationSection({ value, onChange }: { value: LocationFilter; onChange: (v: LocationFilter) => void }) {
-  const { query, setQuery, options } = useTypeahead("location", value.field);
-  const label = LOCATION_FIELDS.find((f) => f[0] === value.field)?.[1] ?? "City";
   const [bucket, setBucket] = useState<"include" | "exclude">("include");
+  // D3: each bucket has its own geography level — exclude may target a finer grain
+  const activeField = bucket === "include" ? value.field : (value.excludeField ?? value.field);
+  const { query, setQuery, options } = useTypeahead("location", activeField);
+  const label = LOCATION_FIELDS.find((f) => f[0] === activeField)?.[1] ?? "City";
   const toggleKind = (k: LocationKind) =>
     onChange({ ...value, appliesTo: value.appliesTo.includes(k) ? value.appliesTo.filter((x) => x !== k) : [...value.appliesTo, k] });
   return (
@@ -61,7 +63,14 @@ function LocationSection({ value, onChange }: { value: LocationFilter; onChange:
         <RadioOpt label="Exclude" on={bucket === "exclude"} onClick={() => setBucket("exclude")} />
       </div>
       <div className="flex gap-2">
-        <Select value={value.field} onValueChange={(v) => onChange({ ...value, field: v as LocationField, values: [], excludeValues: [] })}>
+        <Select
+          value={activeField}
+          onValueChange={(v) =>
+            bucket === "include"
+              ? onChange({ ...value, field: v as LocationField, values: [] })
+              : onChange({ ...value, excludeField: v as LocationField, excludeValues: [] })
+          }
+        >
           <SelectTrigger className="h-10 w-32 shrink-0">
             <SelectValue />
           </SelectTrigger>
