@@ -539,11 +539,13 @@ export function MlsPopover({
   multiMls,
   mlsCount,
   onChange,
+  officeMode = false, // office/brand views: hide the agent-only extras (multi-MLS, count pills)
 }: {
   value: IncludeExclude;
   multiMls: boolean;
   mlsCount: { buckets: string[] };
   onChange: (v: IncludeExclude, multiMls: boolean, mlsCount: { buckets: string[] }) => void;
+  officeMode?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
@@ -613,7 +615,7 @@ export function MlsPopover({
   return (
     <FilterPopoverShell
       label="MLS"
-      count={value.include.length + (multiMls ? 1 : 0) + mlsCount.buckets.length}
+      count={value.include.length + (officeMode ? 0 : (multiMls ? 1 : 0) + mlsCount.buckets.length)}
       open={open}
       onOpenChange={setOpen}
       width="w-[420px]"
@@ -628,12 +630,15 @@ export function MlsPopover({
         setOpen(false);
       }}
     >
-      {/* A5: isolate agents affiliated with more than one MLS */}
-      <label className="mb-2 flex items-center gap-2 text-sm text-neutral-800">
-        <Checkbox checked={multi} onCheckedChange={() => setMulti(!multi)} />
-        Only agents in multiple MLSs
-      </label>
+      {/* A5: isolate agents affiliated with more than one MLS (agent view only) */}
+      {!officeMode && (
+        <label className="mb-2 flex items-center gap-2 text-sm text-neutral-800">
+          <Checkbox checked={multi} onCheckedChange={() => setMulti(!multi)} />
+          Only agents in multiple MLSs
+        </label>
+      )}
       {/* B3: exact number of MLS affiliations ("6+" open-ended); pills OR together */}
+      {!officeMode && (
       <div className="mb-2 flex items-center gap-2">
         <span className="text-xs font-medium text-neutral-500">Number of MLSs</span>
         {MLS_COUNT_BUCKETS.map((b) => (
@@ -650,6 +655,7 @@ export function MlsPopover({
           </button>
         ))}
       </div>
+      )}
       <div className="relative">
         <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400" />
         <input

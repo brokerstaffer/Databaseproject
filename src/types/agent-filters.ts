@@ -185,8 +185,9 @@ export function activeFilterCount(f: Filters, mode: "agent" | "office" | "brand"
     officeSearchCount(f.officeSearch) +
     rangeCount(f.closedUnits) +
     (f.orchClientIds.length ? 1 : 0);
-  if (mode === "brand" || mode === "location") return shared; // aggregate modes: office-level filters only
-  if (mode === "office") return shared + rangeCount(f.agentCount);
+  if (mode === "location") return shared;
+  // office + brand views also carry the MLS filter (office_mls) and the per-office agent count
+  if (mode === "brand" || mode === "office") return shared + f.mls.include.length + f.mls.exclude.length + rangeCount(f.agentCount);
   return (
     shared +
     f.mls.include.length + f.mls.exclude.length + (f.multiMls ? 1 : 0) + f.mlsCount.buckets.length +

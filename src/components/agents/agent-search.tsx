@@ -578,8 +578,20 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
               <SavedViewsPopover value={filters.savedViews} onChange={(v) => setF("savedViews", v)} />
             </>
           )}
-          {mode === "office" && (
-            <RangePopover label="Agents in office" suffix="#" buckets={COUNT_BUCKETS} value={{ side: "all", ...filters.agentCount }} onChange={(v) => setF("agentCount", { buckets: v.buckets, min: v.min, max: v.max })} />
+          {(mode === "office" || mode === "brand") && (
+            <>
+              <MlsPopover
+                value={filters.mls}
+                multiMls={filters.multiMls}
+                mlsCount={filters.mlsCount}
+                officeMode
+                onChange={(v, multi, mc) => {
+                  setFilters((f) => ({ ...f, mls: v, multiMls: multi, mlsCount: mc }));
+                  setPage(1);
+                }}
+              />
+              <RangePopover label="Agents in office" suffix="#" buckets={COUNT_BUCKETS} value={{ side: "all", ...filters.agentCount }} onChange={(v) => setF("agentCount", { buckets: v.buckets, min: v.min, max: v.max })} />
+            </>
           )}
           {/* office mode always ranges on total units — the List/Buy split is agent-only */}
           <RangePopover label="Closed units" hasSide={mode === "agent"} prefix="#" buckets={COUNT_BUCKETS} value={filters.closedUnits} onChange={(v) => setF("closedUnits", v)} />
