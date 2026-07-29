@@ -306,7 +306,7 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
   const [profileId, setProfileId] = useState<string | null>(null); // A5: agent profile dialog
   const [showAllBrands, setShowAllBrands] = useState(false); // B5: include single-office independents
   const [locGran, setLocGran] = useState<"state" | "county" | "city">("state"); // D4 granularity
-  const [locKind, setLocKind] = useState<"office" | "home" | "transacted" | "all">("office"); // D4 basis
+  const [locKinds, setLocKinds] = useState<("office" | "home" | "transacted")[]>(["office"]); // D4 basis (multi-select)
   const [source, setSource] = useState<DataSource>("all");
   const [colOrder, setColOrder] = useState<string[]>(DEFAULT_COL_ORDER);
   const [hiddenCols, setHiddenCols] = useState<Set<string>>(new Set());
@@ -373,7 +373,7 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
       ...f,
       location: {
         field: locGran,
-        appliesTo: locKind === "all" ? ["office", "home", "transacted"] : [locKind],
+        appliesTo: [...locKinds],
         values: [label],
         excludeValues: [],
         excludeField: locGran,
@@ -439,7 +439,7 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
           // B5: single-office "brands" are just the brokerage's own name — hidden by default
           filters:
             mode === "brand" && showAllBrands ? { ...filters, includeSingleOfficeBrands: "true" }
-            : mode === "location" ? { ...filters, locGranularity: locGran, locKind }
+            : mode === "location" ? { ...filters, locGranularity: locGran, locKinds }
             : filters,
         }),
         signal: ctrl.signal,
@@ -454,7 +454,7 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
     } finally {
       if (seq === reqSeq.current) setLoading(false);
     }
-  }, [mode, source, sortBy, sortDir, page, pageSize, filters, showAllBrands, locGran, locKind]);
+  }, [mode, source, sortBy, sortDir, page, pageSize, filters, showAllBrands, locGran, locKinds]);
 
   useEffect(() => {
     fetchData();
@@ -661,17 +661,23 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
                       </button>
                     ))}
                     <span className="mx-1 text-neutral-300">|</span>
-                    {(["office", "home", "transacted", "all"] as const).map((k) => (
+                    {(["office", "home", "transacted"] as const).map((k) => (
                       <button
                         key={k}
                         type="button"
-                        title={k === "all" ? "Any of the three locations (an agent counts once per place)" : `By ${k} location`}
-                        onClick={() => { setLocKind(k); setPage(1); }}
-                        className={locKind === k
+                        title={`Count agents by ${k} location — combine freely; an agent counts once per place`}
+                        onClick={() => {
+                          setLocKinds((ks) => {
+                            if (ks.includes(k)) return ks.length > 1 ? ks.filter((x) => x !== k) : ks; // never empty
+                            return [...ks, k];
+                          });
+                          setPage(1);
+                        }}
+                        className={locKinds.includes(k)
                           ? "rounded-full border border-brand bg-brand px-2.5 py-0.5 text-xs text-white"
                           : "rounded-full border border-neutral-300 px-2.5 py-0.5 text-xs text-neutral-700 hover:border-neutral-400"}
                       >
-                        {k === "office" ? "Office" : k === "home" ? "Home" : k === "transacted" ? "Transacted" : "All"}
+                        {k === "office" ? "Office" : k === "home" ? "Home" : "Transacted"}
                       </button>
                     ))}
                   </span>
