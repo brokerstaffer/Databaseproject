@@ -64,7 +64,7 @@ export interface Agent {
 }
 
 export type SortDir = "asc" | "desc";
-export type SearchMode = "agent" | "office" | "brand" | "location";
+export type SearchMode = "agent" | "office" | "brand" | "location" | "mls";
 export type DataSource = "all" | "courted" | "zillow_realtor";
 
 export interface SearchResponse {

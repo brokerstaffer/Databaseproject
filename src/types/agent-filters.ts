@@ -178,14 +178,14 @@ export function normalizeFilters(
 // Mode-aware: the badge counts ONLY the filters the current mode's query actually applies.
 // Office mode applies just: location, sales volume, office search, closed units, agent count,
 // and the client filter — everything else is agent-only.
-export function activeFilterCount(f: Filters, mode: "agent" | "office" | "brand" | "location" = "agent"): number {
+export function activeFilterCount(f: Filters, mode: "agent" | "office" | "brand" | "location" | "mls" = "agent"): number {
   const shared =
     f.location.values.length + f.location.excludeValues.length +
     rangeCount(f.salesVolume) +
     officeSearchCount(f.officeSearch) +
     rangeCount(f.closedUnits) +
     (f.orchClientIds.length ? 1 : 0);
-  if (mode === "location") return shared;
+  if (mode === "location" || mode === "mls") return shared;
   // office + brand views also carry the MLS filter (office_mls) and the per-office agent count
   if (mode === "brand" || mode === "office") return shared + f.mls.include.length + f.mls.exclude.length + rangeCount(f.agentCount);
   return (
