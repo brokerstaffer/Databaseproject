@@ -187,6 +187,7 @@ const COLUMNS: Col[] = [
   {
     key: "enriched",
     label: "Enriched",
+    sortBy: "enriched_at",
     render: (a) =>
       a.enriched_at ? (
         <span className="text-green-700">
@@ -197,7 +198,7 @@ const COLUMNS: Col[] = [
       ),
   },
   { key: "inCampaign", label: "Client campaign", render: (a) => (a.client_campaigns ? capped(String(a.client_campaigns)) : <span className="text-neutral-400">—</span>) },
-  { key: "replied", label: "Replied", render: (a) => (a.has_replied ? <span className="text-green-700">✓ replied</span> : <span className="text-neutral-400">—</span>) },
+  { key: "replied", label: "Replied", sortBy: "has_replied", render: (a) => (a.has_replied ? <span className="text-green-700">✓ replied</span> : <span className="text-neutral-400">—</span>) },
 ];
 
 const DEFAULT_COL_ORDER = COLUMNS.map((c) => c.key);
