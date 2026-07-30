@@ -48,6 +48,9 @@ export function ExportDialog({
 }) {
   const [method, setMethod] = useState<"campaign" | "csv" | "portal">("campaign");
   const [sourcePriority, setSourcePriority] = useState<"courted" | "zillow" | "realtor">("courted");
+  // #4: which MLS's production numbers feed the campaign variables — [] = all combined
+  const [mlsScopeSel, setMlsScopeSel] = useState<string[]>([]);
+  const [mlsOpts, setMlsOpts] = useState<{ id: string; code: string | null; name: string | null; ready?: boolean }[]>([]);
   const [portalTarget, setPortalTarget] = useState<"agents" | "dnc">("agents");
   const [portalClients, setPortalClients] = useState<PortalClientOpt[]>([]);
   const [portalClient, setPortalClient] = useState("");
@@ -102,6 +105,10 @@ export function ExportDialog({
       .then((r) => r.json())
       .then((j) => setAllClients(j.clients ?? []))
       .catch(() => setAllClients([]));
+    fetch("/api/search/options?type=mls")
+      .then((r) => r.json())
+      .then((j) => setMlsOpts(Array.isArray(j.options) ? j.options : []))
+      .catch(() => setMlsOpts([]));
   }, [open, method]);
 
   // Load campaigns for the currently-selected clients (grouped per client). Keeps still-valid
@@ -226,6 +233,7 @@ export function ExportDialog({
         orchClientIds: [...selectedClientIds],
         campaigns: chosen.map((c) => ({ id: c.bison_id, name: c.name, clientId: c.client_id })),
         sourcePriority,
+        mlsScope: mlsScopeSel.length ? mlsScopeSel : undefined,
       }),
     });
     setBusy(false);
@@ -427,6 +435,44 @@ export function ExportDialog({
                 <p className="mt-1 text-xs text-neutral-500">
                   Which source’s values win for the lead fields — blanks fall back to the next source
                   ({sourcePriority === "courted" ? "MLS → Zillow → Realtor" : sourcePriority === "zillow" ? "Zillow → MLS → Realtor" : "Realtor → MLS → Zillow"}).
+                </p>
+              </div>
+              <div>
+                <label className="text-sm font-medium text-neutral-700">MLS data to send</label>
+                <div className="mt-1.5 flex flex-wrap gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setMlsScopeSel([])}
+                    className={cn(
+                      "rounded-full border px-2.5 py-1 text-xs font-medium",
+                      mlsScopeSel.length === 0 ? "border-brand bg-brand text-white" : "border-neutral-300 text-neutral-700 hover:bg-neutral-50"
+                    )}
+                  >
+                    All MLSs (combined)
+                  </button>
+                  {mlsOpts.map((m) => (
+                    <button
+                      key={m.id}
+                      type="button"
+                      disabled={!m.ready}
+                      title={m.ready ? undefined : "Available after this MLS's next data refresh"}
+                      onClick={() => setMlsScopeSel((sel) => (sel.includes(m.id) ? sel.filter((x) => x !== m.id) : [...sel, m.id]))}
+                      className={cn(
+                        "rounded-full border px-2.5 py-1 text-xs font-medium",
+                        !m.ready
+                          ? "cursor-not-allowed border-neutral-200 text-neutral-300"
+                          : mlsScopeSel.includes(m.id)
+                          ? "border-brand bg-brand text-white"
+                          : "border-neutral-300 text-neutral-700 hover:bg-neutral-50"
+                      )}
+                    >
+                      {m.code ?? m.name}
+                    </button>
+                  ))}
+                </div>
+                <p className="mt-1 text-xs text-neutral-500">
+                  The production numbers pushed as campaign variables. Pick one or more MLSs to send only those MLSs&apos; figures
+                  (summed); grayed-out MLSs unlock as their per-MLS data lands with the scraper refreshes.
                 </p>
               </div>
               <p className="text-xs text-neutral-500">

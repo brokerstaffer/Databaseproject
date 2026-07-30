@@ -95,9 +95,13 @@ function ContactCell({ a, field }: { a: Agent; field: "email" | "phone" }) {
   const preferred = (field === "email" ? a.preferred_email : a.preferred_phone) as string | null;
   const ids = (a.source_ids ?? {}) as Record<string, { email?: string | null; phone?: string | null } | undefined>;
   const norm = field === "email" ? normEmailV : normPhoneV;
-  const entries = (["courted", "zillow", "realtor"] as const)
-    .map((s) => ({ source: s, value: ids[s]?.[field] ?? null }))
+  const entries: { source: string; value: string | null }[] = (["courted", "zillow", "realtor"] as const)
+    .map((s) => ({ source: s as string, value: ids[s]?.[field] ?? null }))
     .filter((e) => e.value);
+  // enriched + agent-provided emails must stay visible next to the original — Bison
+  // leads may carry either, and operators map them back by eye
+  if (field === "email" && a.enriched_email) entries.push({ source: "enriched", value: String(a.enriched_email) });
+  if (ids.agent_provided?.[field]) entries.push({ source: "provided", value: ids.agent_provided[field] ?? null });
   const uniq = new Set([preferred, ...entries.map((e) => e.value)].filter(Boolean).map((v) => norm(v)));
   const breakdown = uniq.size > 1 ? entries : [];
   return (

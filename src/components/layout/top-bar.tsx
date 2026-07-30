@@ -83,7 +83,7 @@ export function TopBar({ initials, email }: { initials: string; email: string })
           onChange={(e) => onType(e.target.value)}
           onFocus={() => setFocus(true)}
           onBlur={() => setTimeout(() => setFocus(false), 120)}
-          placeholder="Search agents by name…"
+          placeholder="Search by name, email, or phone…"
           className="h-9 w-full rounded-lg border border-neutral-200 bg-[#f6f7f9] pl-9 pr-3 text-sm text-neutral-900 placeholder:text-neutral-400 focus:border-brand/50 focus:outline-none focus:ring-1 focus:ring-brand/30"
         />
         {focus && q.trim().length > 0 && options.length > 0 && (

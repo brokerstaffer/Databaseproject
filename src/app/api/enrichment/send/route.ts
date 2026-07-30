@@ -55,7 +55,14 @@ export async function POST(req: NextRequest) {
   // stats coverage — the same gate the search engine uses), stamp the scope on the batch so
   // the worker pushes THAT MLS's numbers as the campaign variables.
   let mlsScope: string[] | null = null;
-  const mlsInclude = Array.isArray((f?.mls as { include?: unknown })?.include)
+  // #4: an explicit dialog selection outranks the filter-derived scope; both pass the
+  // same coverage gate (every chosen MLS must have near-complete per-MLS data).
+  const explicitScope = Array.isArray(body?.mlsScope)
+    ? (body.mlsScope.filter((x: unknown) => typeof x === "string") as string[])
+    : [];
+  const mlsInclude = explicitScope.length
+    ? explicitScope
+    : Array.isArray((f?.mls as { include?: unknown })?.include)
     ? ((f.mls as { include: unknown[] }).include.filter((x) => typeof x === "string") as string[])
     : [];
   if (mlsInclude.length) {

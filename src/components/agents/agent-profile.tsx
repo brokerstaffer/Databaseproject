@@ -102,7 +102,7 @@ export function AgentProfileDialog({ agentId, onClose }: { agentId: string | nul
   }, [agentId, reloadKey]);
 
   async function saveProvided() {
-    if (saving || (!newEmail.trim() && !newPhone.trim())) return;
+    if (saving) return;
     setSaving(true);
     const res = await fetch("/api/agents/profile", {
       method: "PATCH",
@@ -115,7 +115,7 @@ export function AgentProfileDialog({ agentId, onClose }: { agentId: string | nul
       toast.error(j.error ?? "Failed to save");
       return;
     }
-    toast.success("Contact info added — campaign sends will prefer it");
+    toast.success(newEmail.trim() || newPhone.trim() ? "Contact info saved — campaign sends will prefer it" : "Agent-provided contact removed");
     setEditOpen(false);
     setReloadKey((k) => k + 1);
   }
@@ -140,7 +140,12 @@ export function AgentProfileDialog({ agentId, onClose }: { agentId: string | nul
                 {a.license_number ? ` · License #${a.license_number}` : ""}
               </div>
               <div className="truncate text-neutral-600">{[a.brand, a.office_name].filter(Boolean).join(" — ") || "No office on file"}</div>
-              <div className="truncate text-neutral-600">{String(a.enriched_email ?? a.preferred_email ?? "No email")}</div>
+              <div className="truncate text-neutral-600">
+                {a.preferred_email ? String(a.preferred_email) : "No source email"}
+                {a.enriched_email && a.enriched_email !== a.preferred_email && (
+                  <span className="block truncate text-xs text-neutral-400">enriched: {String(a.enriched_email)}</span>
+                )}
+              </div>
               <div className="text-neutral-600">{String(a.preferred_phone ?? "No phone")}</div>
             </div>
 
@@ -148,8 +153,18 @@ export function AgentProfileDialog({ agentId, onClose }: { agentId: string | nul
             <div className="rounded-xl border border-neutral-200 p-3">
               <div className="flex items-center justify-between">
                 <span className="text-sm font-semibold text-neutral-900">Provided by agent</span>
-                <button type="button" className="text-xs text-blue-700 hover:underline" onClick={() => setEditOpen((v) => !v)}>
-                  {editOpen ? "Cancel" : "Add contact info"}
+                <button
+                  type="button"
+                  className="text-xs text-blue-700 hover:underline"
+                  onClick={() => {
+                    if (!editOpen) {
+                      setNewEmail(a?.agent_provided?.email ?? "");
+                      setNewPhone(a?.agent_provided?.phone ?? "");
+                    }
+                    setEditOpen((v) => !v);
+                  }}
+                >
+                  {editOpen ? "Cancel" : a?.agent_provided?.email || a?.agent_provided?.phone ? "Edit / remove" : "Add contact info"}
                 </button>
               </div>
               {a.agent_provided?.email || a.agent_provided?.phone ? (
@@ -166,10 +181,11 @@ export function AgentProfileDialog({ agentId, onClose }: { agentId: string | nul
               )}
               {editOpen && (
                 <div className="mt-2 space-y-2">
-                  <Input placeholder="New email (optional)" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} />
-                  <Input placeholder="New phone (optional)" value={newPhone} onChange={(e) => setNewPhone(e.target.value)} />
-                  <div className="flex justify-end">
-                    <Button size="sm" onClick={saveProvided} disabled={saving || (!newEmail.trim() && !newPhone.trim())}>
+                  <Input placeholder="Email (clear to remove)" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} />
+                  <Input placeholder="Phone (clear to remove)" value={newPhone} onChange={(e) => setNewPhone(e.target.value)} />
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] text-neutral-400">Saving replaces both fields; clearing both removes the entry.</span>
+                    <Button size="sm" onClick={saveProvided} disabled={saving}>
                       {saving ? "Saving…" : "Save"}
                     </Button>
                   </div>

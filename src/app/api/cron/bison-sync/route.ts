@@ -148,6 +148,14 @@ async function runLeadSync(pool: any, key: string, base: string) {
               "select id, lower(enriched_email) e from agents where lower(enriched_email) = any($1) order by id", [rest]);
             for (const r of enr.rows) if (!matched.has(r.e)) matched.set(r.e, r.id);
           }
+          // agent-provided emails lead campaign sends since C3 — leads created with them
+          // must map back to the same agent
+          const rest2 = emails.filter((e) => !matched.has(e));
+          if (rest2.length) {
+            const prov = await pool.query(
+              "select id, lower(source_ids->'agent_provided'->>'email') e from agents where lower(source_ids->'agent_provided'->>'email') = any($1) order by id", [rest2]);
+            for (const r of prov.rows) if (!matched.has(r.e)) matched.set(r.e, r.id);
+          }
         }
         const dbc = await pool.connect();
         try {

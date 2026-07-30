@@ -74,20 +74,32 @@ export async function PATCH(req: NextRequest) {
   }
   const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
   const phone = typeof body.phone === "string" ? body.phone.trim() : "";
-  if (!email && !phone) return NextResponse.json({ error: "Provide an email or a phone number" }, { status: 400 });
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     return NextResponse.json({ error: "That email doesn't look valid" }, { status: 400 });
+  }
+
+  const pool = getPool();
+  // REPLACE semantics: the form sends both fields; an emptied field removes that piece,
+  // and clearing both removes the agent-provided entry entirely.
+  if (!email && !phone) {
+    const { rowCount } = await pool.query(
+      `update agents set source_ids = source_ids - 'agent_provided', updated_at = now() where id = $1`,
+      [id]
+    );
+    if (!rowCount) return NextResponse.json({ error: "not found" }, { status: 404 });
+    await pool.query(`insert into audit_logs (action, performed_by, details) values ('agent_contact_added', $1, $2)`, [
+      user.email ?? user.id,
+      `Agent ${id}: removed agent-provided contact info`,
+    ]);
+    return NextResponse.json({ ok: true, agent_provided: null });
   }
 
   const provided: Record<string, string> = { added_by: user.email ?? user.id, added_at: new Date().toISOString() };
   if (email) provided.email = email;
   if (phone) provided.phone = phone;
-
-  const pool = getPool();
   const { rowCount } = await pool.query(
     `update agents
-        set source_ids = coalesce(source_ids, '{}'::jsonb)
-              || jsonb_build_object('agent_provided', coalesce(source_ids->'agent_provided', '{}'::jsonb) || $2::jsonb),
+        set source_ids = coalesce(source_ids, '{}'::jsonb) || jsonb_build_object('agent_provided', $2::jsonb),
             updated_at = now()
       where id = $1`,
     [id, JSON.stringify(provided)]
@@ -95,7 +107,7 @@ export async function PATCH(req: NextRequest) {
   if (!rowCount) return NextResponse.json({ error: "not found" }, { status: 404 });
   await pool.query(`insert into audit_logs (action, performed_by, details) values ('agent_contact_added', $1, $2)`, [
     user.email ?? user.id,
-    `Agent ${id}: added agent-provided ${[email && "email", phone && "phone"].filter(Boolean).join(" + ")}`,
+    `Agent ${id}: set agent-provided ${[email && "email", phone && "phone"].filter(Boolean).join(" + ")}`,
   ]);
   return NextResponse.json({ ok: true, agent_provided: provided });
 }
