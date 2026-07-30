@@ -50,7 +50,7 @@ export function ExportDialog({
   const [sourcePriority, setSourcePriority] = useState<"courted" | "zillow" | "realtor">("courted");
   // #4: which MLS's production numbers feed the campaign variables — [] = all combined
   const [mlsScopeSel, setMlsScopeSel] = useState<string[]>([]);
-  const [mlsOpts, setMlsOpts] = useState<{ id: string; code: string | null; name: string | null; ready?: boolean }[]>([]);
+  const [mlsOpts, setMlsOpts] = useState<{ id: string; code: string | null; name: string | null; ready?: boolean; agents?: number }[] | null>(null);
   const [portalTarget, setPortalTarget] = useState<"agents" | "dnc">("agents");
   const [portalClients, setPortalClients] = useState<PortalClientOpt[]>([]);
   const [portalClient, setPortalClient] = useState("");
@@ -105,11 +105,27 @@ export function ExportDialog({
       .then((r) => r.json())
       .then((j) => setAllClients(j.clients ?? []))
       .catch(() => setAllClients([]));
-    fetch("/api/search/options?type=mls")
-      .then((r) => r.json())
-      .then((j) => setMlsOpts(Array.isArray(j.options) ? j.options : []))
-      .catch(() => setMlsOpts([]));
   }, [open, method]);
+
+  // "MLS data to send" offers only the MLSs present in THIS agent set (filters or explicit
+  // selection), with each MLS's agent count — not all 34 in the system.
+  useEffect(() => {
+    if (!open || method !== "campaign") return;
+    let active = true;
+    setMlsOpts(null);
+    fetch("/api/search/mls-in-set", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ source, filters, selectedIds: selectedIds.length ? selectedIds : undefined }),
+    })
+      .then((r) => r.json())
+      .then((j) => active && setMlsOpts(Array.isArray(j.options) ? j.options : []))
+      .catch(() => active && setMlsOpts([]));
+    return () => {
+      active = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, method, source, JSON.stringify(filters), selectedIds.length]);
 
   // Load campaigns for the currently-selected clients (grouped per client). Keeps still-valid
   // campaign picks and pre-checks the default campaign of any newly-added client.
@@ -450,7 +466,7 @@ export function ExportDialog({
                   >
                     All MLSs (combined)
                   </button>
-                  {mlsOpts.map((m) => (
+                  {(mlsOpts ?? []).map((m) => (
                     <button
                       key={m.id}
                       type="button"
@@ -467,12 +483,15 @@ export function ExportDialog({
                       )}
                     >
                       {m.code ?? m.name}
+                      {m.agents != null && <span className="ml-1 opacity-60">{m.agents.toLocaleString()}</span>}
                     </button>
                   ))}
                 </div>
+                {mlsOpts === null && <p className="mt-1 text-xs text-neutral-400">Checking which MLSs these agents belong to…</p>}
+                {mlsOpts?.length === 0 && <p className="mt-1 text-xs text-neutral-400">These agents have no MLS affiliations.</p>}
                 <p className="mt-1 text-xs text-neutral-500">
-                  The production numbers pushed as campaign variables. Pick one or more MLSs to send only those MLSs&apos; figures
-                  (summed); grayed-out MLSs unlock as their per-MLS data lands with the scraper refreshes.
+                  Only the MLSs these agents belong to, with how many of them are in each. Pick one or more to send just
+                  those MLSs&apos; figures (summed); greyed-out MLSs unlock as their per-MLS data lands with the scraper refreshes.
                 </p>
               </div>
               <p className="text-xs text-neutral-500">
