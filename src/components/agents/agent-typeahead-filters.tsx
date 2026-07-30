@@ -146,9 +146,7 @@ function CheckList({
           ))
         )}
       </div>
-      {options.length >= OPTIONS_CAP && (
-        <p className="mt-1 px-1 text-[11px] text-neutral-400">Showing the first {OPTIONS_CAP} matches — type to narrow.</p>
-      )}
+
     </>
   );
 }

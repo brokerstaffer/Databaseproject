@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SideRadios, BucketPills, MinMax } from "./agent-filters";
-import { useTypeahead, RadioOpt, Chips, SearchBox, LOCATION_FIELDS, LOCATION_KINDS } from "./agent-typeahead-filters";
+import { useTypeahead, useLocationOptions, RadioOpt, Chips, SearchBox, LOCATION_FIELDS, LOCATION_KINDS } from "./agent-typeahead-filters";
 import type {
   Bucket,
   Filters,
@@ -51,7 +51,9 @@ function LocationSection({ value, onChange }: { value: LocationFilter; onChange:
   const [bucket, setBucket] = useState<"include" | "exclude">("include");
   // D3: each bucket has its own geography level — exclude may target a finer grain
   const activeField = bucket === "include" ? value.field : (value.excludeField ?? value.field);
-  const { query, setQuery, options } = useTypeahead("location", activeField);
+  // C2: the counted location options (agent-count ordered, live totals) — same source the popover uses
+  const { query, setQuery, options: locOpts, total, agents } = useLocationOptions(activeField, "agent");
+  const options = locOpts.map((o) => o.v);
   const label = LOCATION_FIELDS.find((f) => f[0] === activeField)?.[1] ?? "City";
   const toggleKind = (k: LocationKind) =>
     onChange({ ...value, appliesTo: value.appliesTo.includes(k) ? value.appliesTo.filter((x) => x !== k) : [...value.appliesTo, k] });
@@ -100,7 +102,12 @@ function LocationSection({ value, onChange }: { value: LocationFilter; onChange:
           />
         </div>
       </div>
-      <div className="mt-1 text-right text-xs text-neutral-400">{value.values.length + value.excludeValues.length}/50</div>
+      <div className="mt-1 flex items-center justify-between px-1 text-xs text-neutral-400">
+        <span>
+          {total.toLocaleString()} {total === 1 ? "match" : "matches"} · ≈{agents.toLocaleString()} agents
+        </span>
+        <span>{value.values.length + value.excludeValues.length}/50</span>
+      </div>
       <Chips items={value.values} onRemove={(v) => onChange({ ...value, values: value.values.filter((x) => x !== v) })} />
       <Chips items={value.excludeValues} tone="exclude" onRemove={(v) => onChange({ ...value, excludeValues: value.excludeValues.filter((x) => x !== v) })} />
       <div className="mt-3 space-y-2.5">
