@@ -324,7 +324,7 @@ export async function upsertAgentRows(client: PoolClient, rows: Row[], source: s
     return {
       officeKey: officeName || brand ? OKEY(brand, officeName, officeZip) : null,
       officeName, brand, officeCity, officeState, officeZip, officeAddress,
-      mlsCode, mlsName: txt(r["MLS"]), mlsState: officeState || txt(r["Most Transacted State"]),
+      mlsCode, mlsName: txt(r["MLS Affiliations"]) || txt(r["MLS Affiliation"]) || txt(r["MLS"]), mlsState: officeState || txt(r["Most Transacted State"]),
       memberId: txt(r["Member MLS ID"]),
       sid: txt(r["Courted ID"]), license, email, phoneKey: digits(phone),
       agent, stat, courted,

@@ -40,9 +40,22 @@ const usd = (n: number | null | undefined) => (n == null ? "N/A" : "$" + Math.ro
 const numv = (n: number | null | undefined) => (n == null ? "N/A" : n.toLocaleString());
 const na = (s: string | null | undefined) => (s == null || s === "" ? "N/A" : s);
 const phoneFmt = (s: string | null | undefined) => (s == null || s === "" ? "None" : s);
-// Does this agent's name contain the top-bar search term? (case-insensitive) — drives the highlight.
-function nameMatches(name: string | null | undefined, term: string): boolean {
-  return !!term && !!name && name.toLowerCase().includes(term.toLowerCase());
+// Does this agent match the top-bar search term? The term may be a name, an email, or a
+// phone number — the matching column is the one that gets the green highlight.
+function searchHit(a: Agent, term: string): "agent" | "email" | "phone" | null {
+  const t = term.trim();
+  if (!t) return null;
+  if (t.includes("@")) {
+    const q = t.toLowerCase();
+    const ids = (a.source_ids ?? {}) as Record<string, { email?: string | null } | undefined>;
+    const mails = [a.preferred_email, a.enriched_email, ids.agent_provided?.email];
+    return mails.some((m) => typeof m === "string" && m.toLowerCase().includes(q)) ? "email" : null;
+  }
+  const digits = t.replace(/\D/g, "");
+  if (digits.length >= 7) {
+    return String(a.preferred_phone ?? "").replace(/\D/g, "").includes(digits) ? "phone" : null;
+  }
+  return a.full_name && a.full_name.toLowerCase().includes(t.toLowerCase()) ? "agent" : null;
 }
 function ym(m: number | null | undefined): string {
   if (m == null) return "N/A";
@@ -778,7 +791,7 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
                 </tr>
               ) : (
                 rows.map((a) => {
-                  const hit = mode === "agent" && nameMatches(a.full_name, highlightTerm);
+                  const hitCol = mode === "agent" ? searchHit(a, highlightTerm) : null;
                   return (
                     <tr
                       key={a.id ?? String(a.brand ?? a.location)}
@@ -790,7 +803,9 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
                         )}
                       </td>
                       {activeColumns.map((col) => {
-                        const cellHit = hit && col.key === "agent"; // light-green highlight on the matching name
+                        // green highlight on the cell that matched (name, email, or phone); the
+                        // Agent cell always lights too so the row is obvious when that column is hidden
+                        const cellHit = !!hitCol && (col.key === hitCol || col.key === "agent");
                         // A13/B5: office & brand cells jump to the agent grid with that value
                         // applied as an Include filter; the agent name opens the profile (A5).
                         const jumpKind =
