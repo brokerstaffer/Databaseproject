@@ -27,7 +27,9 @@ export async function GET(req: NextRequest) {
               (c.portal_url is not null and c.portal_token is not null) as has_portal,
               count(distinct l.agent_id)::int as lead_count,
               (select count(distinct b.email) from bison_client_leads b where b.client_id = c.id)::int as bison_leads,
-              (select count(distinct b.agent_id) from bison_client_leads b where b.client_id = c.id and b.agent_id is not null)::int as bison_matched
+              (select count(distinct b.agent_id) from bison_client_leads b where b.client_id = c.id and b.agent_id is not null)::int as bison_matched,
+              (select count(distinct b.email) from bison_client_leads b where b.client_id = c.id and b.replied)::int as bison_replied,
+              (select count(distinct b.email) from bison_client_leads b where b.client_id = c.id and b.bounced)::int as bison_bounced
          from orch_clients c
          left join orch_client_leads l on l.client_id = c.id
         ${inReviewOnly ? "where c.leads_inreview = true" : ""}
