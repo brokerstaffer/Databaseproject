@@ -221,11 +221,39 @@ async function runLeadSync(pool: any, key: string, base: string) {
       warnings.push(`replied sweep failed: ${e instanceof Error ? e.message : "error"}`);
     }
 
+    // C1: bounced sweep — bounce items name the lead directly or via the original
+    // recipient; addresses that aren't campaign leads simply don't match anything.
+    let bouncedTotal = 0;
+    try {
+      const bouncedEmails: string[] = [];
+      for (let page = 1; page <= 400; page++) {
+        const res = await fetch(
+          `${base.replace(/\/+$/, "")}/replies?folder=bounced&pagination_type=length_aware&per_page=100&page=${page}`,
+          { headers: { Authorization: `Bearer ${key}`, Accept: "application/json" }, signal: AbortSignal.timeout(30000) }
+        );
+        if (!res.ok) throw new Error(`bounce sweep ${res.status}`);
+        const j = await res.json();
+        const data: { lead?: { email?: string } | null; primary_to_email_address?: string | null }[] = Array.isArray(j?.data) ? j.data : [];
+        for (const b of data) {
+          const e = String(b.lead?.email ?? b.primary_to_email_address ?? "").trim().toLowerCase();
+          if (e.includes("@")) bouncedEmails.push(e);
+        }
+        const lastPage = j?.meta?.last_page as number | undefined;
+        if (data.length === 0 || (lastPage && page >= lastPage)) break;
+        if (!lastPage && data.length >= 100) throw new Error("bounce sweep: pagination shape unknown");
+      }
+      bouncedTotal = bouncedEmails.length;
+      await pool.query("update bison_client_leads set bounced = (email = any($1::text[])) where bounced is distinct from (email = any($1::text[]))", [bouncedEmails]);
+    } catch (e) {
+      warnings.push(`bounce sweep failed: ${e instanceof Error ? e.message : "error"}`);
+    }
+
     const summary = {
       campaignsSynced,
       leads: leadsTotal,
       matched: matchedTotal,
       replied: repliedTotal,
+      bounced: bouncedTotal,
       errors,
       warnings,
       unmappedClientLike,

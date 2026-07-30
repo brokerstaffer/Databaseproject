@@ -523,6 +523,7 @@ export type ContactValue = {
   enriched: "" | "has" | "missing"; // C2: went through enrichment and holds a verified email
   inCampaign: "" | "has" | "missing"; // C5: already in a client's Bison campaign
   replied: "" | "has" | "missing"; // C4: has ever replied (Bison sync)
+  bounced: "" | "has" | "missing"; // C1: emails bounced (Bison sync)
 };
 export function ContactPopover({ value, onChange }: { value: ContactValue; onChange: (v: ContactValue) => void }) {
   const [open, setOpen] = useState(false);

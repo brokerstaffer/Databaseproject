@@ -60,6 +60,8 @@ export interface Agent {
   enriched_email_status?: string | null;
   enriched_at?: string | null; // when the enrichment pipeline last processed this agent (C2)
   client_campaigns?: string | null; // client names whose Bison campaigns hold this agent (C5)
+  has_replied?: boolean;
+  has_bounced?: boolean; // C1: a campaign email to this lead bounced
   [key: string]: unknown;
 }
 

@@ -61,7 +61,7 @@ export interface Filters {
   nameQuery: string; // free-text name search (top search bar)
   orchClientIds: string[]; // orchestrator clients (orch_clients.id) — [] = off; multi-select
   orchClientMode: "include" | "exclude"; // include those clients' leads, or exclude them
-  contact: { email: "" | "has" | "missing"; phone: "" | "has" | "missing"; enriched: "" | "has" | "missing"; inCampaign: "" | "has" | "missing"; replied: "" | "has" | "missing" }; // has/missing per dimension ("" = any); enriched=C2, inCampaign=C5, replied=C4
+  contact: { email: "" | "has" | "missing"; phone: "" | "has" | "missing"; enriched: "" | "has" | "missing"; inCampaign: "" | "has" | "missing"; replied: "" | "has" | "missing"; bounced: "" | "has" | "missing" }; // has/missing per dimension ("" = any); enriched=C2, inCampaign=C5, replied=C4
   multiMls: boolean; // only agents affiliated with 2+ MLSs
   mlsCount: { buckets: string[] }; // exact MLS-affiliation counts: "2".."5" exact, "6+" open (B3)
   savedViews: { include: string[]; exclude: string[] }; // saved_lists ids used as live include/exclude sets (A12)
@@ -87,7 +87,7 @@ export const DEFAULT_FILTERS: Filters = {
   nameQuery: "",
   orchClientIds: [],
   orchClientMode: "include",
-  contact: { email: "", phone: "", enriched: "", inCampaign: "", replied: "" },
+  contact: { email: "", phone: "", enriched: "", inCampaign: "", replied: "", bounced: "" },
   multiMls: false,
   mlsCount: { buckets: [] },
   savedViews: { include: [], exclude: [] },
@@ -138,8 +138,8 @@ export const officeSearchCount = (o: OfficeSearchFilter) => ieCount(o.brand) + i
 const mmCount = (m: MinMax) => (m.min ? 1 : 0) + (m.max ? 1 : 0);
 export const zillowRealtorCount = (z: ZillowRealtorFilter) =>
   z.languages.length + mmCount(z.totalSales) + mmCount(z.avgPriceAllTime) + mmCount(z.avgVolumeAllTime) + (z.hasLinkedin ? 1 : 0);
-export const contactCount = (c: { email: string; phone: string; enriched?: string; inCampaign?: string; replied?: string }) =>
-  (c.email ? 1 : 0) + (c.phone ? 1 : 0) + (c.enriched ? 1 : 0) + (c.inCampaign ? 1 : 0) + (c.replied ? 1 : 0);
+export const contactCount = (c: { email: string; phone: string; enriched?: string; inCampaign?: string; replied?: string; bounced?: string }) =>
+  (c.email ? 1 : 0) + (c.phone ? 1 : 0) + (c.enriched ? 1 : 0) + (c.inCampaign ? 1 : 0) + (c.replied ? 1 : 0) + (c.bounced ? 1 : 0);
 
 // Merge a partial/legacy filters object onto the defaults. Older saved views stored a single
 // `orchClientId` (string) before the Client filter became multi-select — fold it into the
@@ -159,10 +159,11 @@ export function normalizeFilters(
       enriched: "",
       inCampaign: "",
       replied: "",
+      bounced: "",
     };
   }
-  if (!merged.contact) merged.contact = { email: "", phone: "", enriched: "", inCampaign: "", replied: "" };
-  merged.contact = { email: merged.contact.email ?? "", phone: merged.contact.phone ?? "", enriched: merged.contact.enriched ?? "", inCampaign: merged.contact.inCampaign ?? "", replied: merged.contact.replied ?? "" };
+  if (!merged.contact) merged.contact = { email: "", phone: "", enriched: "", inCampaign: "", replied: "", bounced: "" };
+  merged.contact = { email: merged.contact.email ?? "", phone: merged.contact.phone ?? "", enriched: merged.contact.enriched ?? "", inCampaign: merged.contact.inCampaign ?? "", replied: merged.contact.replied ?? "", bounced: merged.contact.bounced ?? "" };
   if (!merged.savedViews) merged.savedViews = { include: [], exclude: [] };
   else merged.savedViews = { include: merged.savedViews.include ?? [], exclude: merged.savedViews.exclude ?? [] };
   if (!merged.location.excludeValues) merged.location = { ...merged.location, excludeValues: [] };

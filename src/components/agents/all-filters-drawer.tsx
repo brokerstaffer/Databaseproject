@@ -229,7 +229,7 @@ interface MlsItem {
 }
 
 function EnrichmentSection({ value, onChange }: { value: Filters["contact"]; onChange: (v: Filters["contact"]) => void }) {
-  const row = (k: "enriched" | "inCampaign" | "replied", title: string, hasLbl: string, noLbl: string) => (
+  const row = (k: "enriched" | "inCampaign" | "replied" | "bounced", title: string, hasLbl: string, noLbl: string) => (
     <div className="mb-3 last:mb-0">
       <div className="mb-1.5 text-xs font-medium text-neutral-500">{title}</div>
       <div className="flex items-center gap-6">
@@ -240,10 +240,11 @@ function EnrichmentSection({ value, onChange }: { value: Filters["contact"]; onC
     </div>
   );
   return (
-    <Section title="Enrichment & campaigns" count={(value.enriched ? 1 : 0) + (value.inCampaign ? 1 : 0) + (value.replied ? 1 : 0)}>
+    <Section title="Enrichment & campaigns" count={(value.enriched ? 1 : 0) + (value.inCampaign ? 1 : 0) + (value.replied ? 1 : 0) + (value.bounced ? 1 : 0)}>
       {row("enriched", "Verified / enriched", "Enriched", "Not enriched")}
       {row("inCampaign", "In a client campaign", "In campaign", "Not in campaign")}
       {row("replied", "Has replied to us", "Replied", "Never replied")}
+      {row("bounced", "Emails bounced", "Bounced", "Not bounced")}
     </Section>
   );
 }
