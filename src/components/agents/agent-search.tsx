@@ -596,7 +596,9 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
           {/* Only the filters the current mode's query actually applies are shown — office
               mode narrows on location / volume / office / units / agent count / client. */}
           <ClientPopover value={filters.orchClientIds} clientMode={filters.orchClientMode} onChange={(ids, m) => { setFilters((p) => ({ ...p, orchClientIds: ids, orchClientMode: m })); setPage(1); }} />
-          <LocationPopover value={filters.location} onChange={(v) => setF("location", v)} officeMode={mode !== "agent"} />
+          {/* Office/Brand views filter OFFICES (office locations only); Agent, MLS and
+              Location views filter AGENTS — all three location kinds apply (B8 follow-up). */}
+          <LocationPopover value={filters.location} onChange={(v) => setF("location", v)} officeMode={mode === "office" || mode === "brand"} />
           <RangePopover label="Sales volume" hasSide prefix="$" buckets={SALES_VOLUME_BUCKETS} value={filters.salesVolume} onChange={(v) => setF("salesVolume", v)} />
           <OfficeSearchPopover value={filters.officeSearch} onChange={(v) => setF("officeSearch", v)} />
           {mode === "agent" && (
