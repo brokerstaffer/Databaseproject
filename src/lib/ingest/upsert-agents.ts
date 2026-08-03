@@ -561,6 +561,13 @@ export async function upsertAgentRows(client: PoolClient, rows: Row[], source: s
       //                         would be frozen at its first-scrape values forever. Their own
       //                         columns always take the new value, and NOTHING else is touched —
       //                         a Zillow refresh can never null out Courted metrics.
+      // metric columns refresh fill-don't-blank: a partial export (some accounts ship only
+      // volume+units) must never erase metrics a fuller export delivered (REBNY lesson)
+      const METRIC_COLS = new Set([
+        "sales_volume", "pct_change", "buy_side_dollar", "list_side_dollar", "approx_gci",
+        "avg_sale_price", "closed_transactions", "units", "buy_side_count", "list_side_count",
+        "closed_rentals", "avg_rental_price", "active_listings", "pending_listings",
+      ]);
       const setClause = AGENT_COLS
         .filter(([n]) => source === "courted" || SOURCE_ONLY_COLS.has(n) || MERGE_FILL_COLS.has(n))
         .map(([n]) => {
@@ -568,6 +575,7 @@ export async function upsertAgentRows(client: PoolClient, rows: Row[], source: s
           if (source !== "courted" && MERGE_FILL_COLS.has(n)) {
             return `${n} = case when 'courted' = any(coalesce(a.sources, array[]::text[])) then coalesce(a.${n}, x.${n}) else coalesce(x.${n}, a.${n}) end`;
           }
+          if (METRIC_COLS.has(n)) return `${n} = coalesce(x.${n}, a.${n})`;
           return `${n} = x.${n}`;
         })
         .join(", ");
@@ -588,7 +596,7 @@ export async function upsertAgentRows(client: PoolClient, rows: Row[], source: s
         `insert into agent_source_stats (agent_id, source, ${STAT_COLS.map(([n]) => n).join(", ")}, scraped_at)
          select x.agent_id, $2, ${STAT_COLS.map(([n]) => `x.${n}`).join(", ")}, now()
          from jsonb_to_recordset($1::jsonb) as x(${recordset(STAT_COLS, "agent_id", "uuid")})
-         on conflict (agent_id, source) do update set ${STAT_COLS.map(([n]) => `${n} = excluded.${n}`).join(", ")}, scraped_at = now()`,
+         on conflict (agent_id, source) do update set ${STAT_COLS.map(([n]) => `${n} = coalesce(excluded.${n}, agent_source_stats.${n})`).join(", ")}, scraped_at = now()`,
         [JSON.stringify(statRows), source]
       );
     }
@@ -601,7 +609,7 @@ export async function upsertAgentRows(client: PoolClient, rows: Row[], source: s
         `insert into agent_mls_stats (agent_id, mls_id, ${STAT_COLS.map(([n]) => n).join(", ")}, scraped_at)
          select x.agent_id, x.mls_id, ${STAT_COLS.map(([n]) => `x.${n}`).join(", ")}, now()
          from jsonb_to_recordset($1::jsonb) as x(agent_id uuid, mls_id uuid, ${STAT_COLS.map(([n, t]) => `${n} ${t}`).join(", ")})
-         on conflict (agent_id, mls_id) do update set ${STAT_COLS.map(([n]) => `${n} = excluded.${n}`).join(", ")}, scraped_at = now()`,
+         on conflict (agent_id, mls_id) do update set ${STAT_COLS.map(([n]) => `${n} = coalesce(excluded.${n}, agent_mls_stats.${n})`).join(", ")}, scraped_at = now()`,
         [JSON.stringify(mlsStatRows)]
       );
       // A5 rollup (client-approved): agents.* becomes the sum across MLSs — but only for
