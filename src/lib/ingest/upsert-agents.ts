@@ -415,17 +415,17 @@ export async function upsertAgentRows(client: PoolClient, rows: Row[], source: s
     // office line (or a team inbox), and the veto picks the compatible one
     const byEmail = new Map<string, string[]>(), byPhone = new Map<string, string[]>();
     // identity fields of every DB candidate, for the merge conflict-veto below
-    const dbMeta = new Map<string, { name: string | null; lic: string | null; email: string | null }>();
+    const dbMeta = new Map<string, { name: string | null; lic: string | null; email: string | null; phone: string | null }>();
     const sids = uniq(prepared.map((p) => p.sid));
     const lics = uniq(prepared.map((p) => p.license));
     const emails = uniq(prepared.map((p) => p.email));
     const phones = uniq(prepared.map((p) => p.phoneKey));
-    const remember = (r: { id: string; full_name: string | null; license_number: string | null; em: string | null }) =>
-      dbMeta.set(r.id, { name: r.full_name, lic: r.license_number, email: r.em });
-    if (sids.length) (await client.query(`select id, full_name, license_number, lower(preferred_email) em, source_ids->$2->>'id' k from agents where source_ids->$2->>'id' = any($1::text[])`, [sids, source])).rows.forEach((r) => { if (r.k != null) bySid.set(r.k, r.id); remember(r); });
-    if (lics.length) (await client.query(`select id, full_name, license_number, lower(preferred_email) em, license_number k from agents where license_number = any($1::text[])`, [lics])).rows.forEach((r) => { byLic.set(r.k, r.id); remember(r); });
-    if (emails.length) (await client.query(`select id, full_name, license_number, lower(preferred_email) em, lower(preferred_email) k from agents where lower(preferred_email) = any($1::text[])`, [emails])).rows.forEach((r) => { byEmail.set(r.k, [...(byEmail.get(r.k) ?? []), r.id]); remember(r); });
-    if (phones.length) (await client.query(`select id, full_name, license_number, lower(preferred_email) em, preferred_phone_digits k from agents where preferred_phone_digits = any($1::text[]) and preferred_phone_digits <> ''`, [phones])).rows.forEach((r) => { byPhone.set(r.k, [...(byPhone.get(r.k) ?? []), r.id]); remember(r); });
+    const remember = (r: { id: string; full_name: string | null; license_number: string | null; em: string | null; ph?: string | null }) =>
+      dbMeta.set(r.id, { name: r.full_name, lic: r.license_number, email: r.em, phone: r.ph ?? null });
+    if (sids.length) (await client.query(`select id, full_name, license_number, lower(preferred_email) em, preferred_phone_digits ph, source_ids->$2->>'id' k from agents where source_ids->$2->>'id' = any($1::text[])`, [sids, source])).rows.forEach((r) => { if (r.k != null) bySid.set(r.k, r.id); remember(r); });
+    if (lics.length) (await client.query(`select id, full_name, license_number, lower(preferred_email) em, preferred_phone_digits ph, license_number k from agents where license_number = any($1::text[])`, [lics])).rows.forEach((r) => { byLic.set(r.k, r.id); remember(r); });
+    if (emails.length) (await client.query(`select id, full_name, license_number, lower(preferred_email) em, preferred_phone_digits ph, lower(preferred_email) k from agents where lower(preferred_email) = any($1::text[])`, [emails])).rows.forEach((r) => { byEmail.set(r.k, [...(byEmail.get(r.k) ?? []), r.id]); remember(r); });
+    if (phones.length) (await client.query(`select id, full_name, license_number, lower(preferred_email) em, preferred_phone_digits ph, preferred_phone_digits k from agents where preferred_phone_digits = any($1::text[]) and preferred_phone_digits <> ''`, [phones])).rows.forEach((r) => { byPhone.set(r.k, [...(byPhone.get(r.k) ?? []), r.id]); remember(r); });
 
     // ---- 5) resolve each row to an agent id (in-batch dedup, order-sensitive; last row wins) ----
     const seen = new Map<string, string>(); // sid/license key -> agent id already assigned in this batch
@@ -454,8 +454,8 @@ export async function upsertAgentRows(client: PoolClient, rows: Row[], source: s
       // an identity-poor row folds a whole office into one hybrid record.
       const metaOf = (id: string) => {
         const fp = finalById.get(id);
-        if (fp) return { name: (fp.agent.full_name as string) ?? null, lic: fp.license, email: fp.email };
-        return dbMeta.get(id) ?? { name: null, lic: null, email: null };
+        if (fp) return { name: (fp.agent.full_name as string) ?? null, lic: fp.license, email: fp.email, phone: fp.phoneKey };
+        return dbMeta.get(id) ?? { name: null, lic: null, email: null, phone: null };
       };
       const licConflict = (id: string) => {
         const c = metaOf(id);
@@ -478,11 +478,19 @@ export async function upsertAgentRows(client: PoolClient, rows: Row[], source: s
         const c = metaOf(id);
         return !!(p.email && c.email && p.email !== c.email);
       };
+      const phoneConflict = (id: string) => {
+        const c = metaOf(id);
+        return !!(p.phoneKey && c.phone && p.phoneKey !== c.phone);
+      };
+      // POLICY (client-set): on the low-trust tiers, contact info must never contradict —
+      // a phone match with differing emails is two people (even with identical names:
+      // Courted's second-brokerage-email profiles stay separate), and an email match with
+      // differing phones is two people. Same Courted ID / license still merges above.
       const passes = (id: string, tier: "email" | "phone") => {
         if (licConflict(id)) return false; // different license = different person
         if (!namesCompatible(id)) return false; // team inbox / shared line guard
-        // phone only: an email conflict also vetoes unless the names are exactly equal
-        if (tier === "phone" && emailConflict(id) && nm(p.agent.full_name as string | null) !== nm(metaOf(id).name)) return false;
+        if (tier === "phone" && emailConflict(id)) return false;
+        if (tier === "email" && phoneConflict(id)) return false;
         return true;
       };
       const pickLow = (key: string, dbMap: Map<string, string[]>, raw: string, tier: "email" | "phone") => {
