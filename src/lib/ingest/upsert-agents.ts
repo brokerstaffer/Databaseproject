@@ -410,18 +410,26 @@ export async function upsertAgentRows(client: PoolClient, rows: Row[], source: s
 
     // ---- 4) match existing agents in bulk (source-id -> license -> email -> phone) ----
     const uniq = (xs: (string | null)[]) => [...new Set(xs.filter((x): x is string => !!x))];
-    const bySid = new Map<string, string>(), byLic = new Map<string, string>(), byEmail = new Map<string, string>(), byPhone = new Map<string, string>();
+    const bySid = new Map<string, string>(), byLic = new Map<string, string>();
+    // low-trust tiers keep EVERY candidate per key — several agents legitimately share an
+    // office line (or a team inbox), and the veto picks the compatible one
+    const byEmail = new Map<string, string[]>(), byPhone = new Map<string, string[]>();
+    // identity fields of every DB candidate, for the merge conflict-veto below
+    const dbMeta = new Map<string, { name: string | null; lic: string | null; email: string | null }>();
     const sids = uniq(prepared.map((p) => p.sid));
     const lics = uniq(prepared.map((p) => p.license));
     const emails = uniq(prepared.map((p) => p.email));
     const phones = uniq(prepared.map((p) => p.phoneKey));
-    if (sids.length) (await client.query(`select id, source_ids->$2->>'id' k from agents where source_ids->$2->>'id' = any($1::text[])`, [sids, source])).rows.forEach((r) => r.k != null && bySid.set(r.k, r.id));
-    if (lics.length) (await client.query(`select id, license_number k from agents where license_number = any($1::text[])`, [lics])).rows.forEach((r) => byLic.set(r.k, r.id));
-    if (emails.length) (await client.query(`select id, lower(preferred_email) k from agents where lower(preferred_email) = any($1::text[])`, [emails])).rows.forEach((r) => byEmail.set(r.k, r.id));
-    if (phones.length) (await client.query(`select id, regexp_replace(coalesce(preferred_phone,''),'[^0-9]','','g') k from agents where regexp_replace(coalesce(preferred_phone,''),'[^0-9]','','g') = any($1::text[]) and regexp_replace(coalesce(preferred_phone,''),'[^0-9]','','g') <> ''`, [phones])).rows.forEach((r) => byPhone.set(r.k, r.id));
+    const remember = (r: { id: string; full_name: string | null; license_number: string | null; em: string | null }) =>
+      dbMeta.set(r.id, { name: r.full_name, lic: r.license_number, email: r.em });
+    if (sids.length) (await client.query(`select id, full_name, license_number, lower(preferred_email) em, source_ids->$2->>'id' k from agents where source_ids->$2->>'id' = any($1::text[])`, [sids, source])).rows.forEach((r) => { if (r.k != null) bySid.set(r.k, r.id); remember(r); });
+    if (lics.length) (await client.query(`select id, full_name, license_number, lower(preferred_email) em, license_number k from agents where license_number = any($1::text[])`, [lics])).rows.forEach((r) => { byLic.set(r.k, r.id); remember(r); });
+    if (emails.length) (await client.query(`select id, full_name, license_number, lower(preferred_email) em, lower(preferred_email) k from agents where lower(preferred_email) = any($1::text[])`, [emails])).rows.forEach((r) => { byEmail.set(r.k, [...(byEmail.get(r.k) ?? []), r.id]); remember(r); });
+    if (phones.length) (await client.query(`select id, full_name, license_number, lower(preferred_email) em, preferred_phone_digits k from agents where preferred_phone_digits = any($1::text[]) and preferred_phone_digits <> ''`, [phones])).rows.forEach((r) => { byPhone.set(r.k, [...(byPhone.get(r.k) ?? []), r.id]); remember(r); });
 
     // ---- 5) resolve each row to an agent id (in-batch dedup, order-sensitive; last row wins) ----
-    const seen = new Map<string, string>(); // any identity key -> agent id already assigned in this batch
+    const seen = new Map<string, string>(); // sid/license key -> agent id already assigned in this batch
+    const seenLow = new Map<string, string[]>(); // email/phone key -> ALL batch claimants (veto picks among them)
     const isNew = new Map<string, boolean>();
     const finalById = new Map<string, Prepared>();
     const statByAgent = new Map<string, Record<string, unknown>>();
@@ -438,13 +446,61 @@ export async function upsertAgentRows(client: PoolClient, rows: Row[], source: s
       // Resolve by tier in priority order (source-id -> license -> email -> phone). At EACH tier,
       // match against agents already assigned in this batch (seen) OR pre-existing ones (db maps),
       // so a higher tier always wins — a shared office phone can't override a license/email match.
+      //
+      // CONFLICT VETO (the REBNY 262 lesson): matching a key is not enough when the
+      // candidate is CONTRADICTED by stronger evidence. Different license numbers are two
+      // different people, always. On the low-trust tiers (email = team inboxes, phone =
+      // shared brokerage lines) a merge additionally requires a compatible name — otherwise
+      // an identity-poor row folds a whole office into one hybrid record.
+      const metaOf = (id: string) => {
+        const fp = finalById.get(id);
+        if (fp) return { name: (fp.agent.full_name as string) ?? null, lic: fp.license, email: fp.email };
+        return dbMeta.get(id) ?? { name: null, lic: null, email: null };
+      };
+      const licConflict = (id: string) => {
+        const c = metaOf(id);
+        return !!(p.license && c.lic && p.license !== c.lic);
+      };
+      const nm = (v: string | null) => (v ?? "").toLowerCase().replace(/[^a-z ]/g, "").trim();
+      const namesCompatible = (id: string) => {
+        const a = nm(p.agent.full_name as string | null), b = nm(metaOf(id).name);
+        if (!a || !b) return true; // nothing to contradict
+        if (a === b) return true;
+        // surname equality (suffixes stripped) — first-name equality alone is NOT enough:
+        // two different Johns share office lines all the time
+        const SUFFIX = new Set(["jr", "sr", "ii", "iii", "iv"]);
+        const toks = (x: string) => x.split(/\s+/).filter((t) => !SUFFIX.has(t));
+        const at = toks(a), bt = toks(b);
+        if (at.length === 0 || bt.length === 0) return true;
+        return at.length > 1 && bt.length > 1 && at[at.length - 1] === bt[bt.length - 1] && at[0][0] === bt[0][0];
+      };
+      const emailConflict = (id: string) => {
+        const c = metaOf(id);
+        return !!(p.email && c.email && p.email !== c.email);
+      };
+      const passes = (id: string, tier: "email" | "phone") => {
+        if (licConflict(id)) return false; // different license = different person
+        if (!namesCompatible(id)) return false; // team inbox / shared line guard
+        // phone only: an email conflict also vetoes unless the names are exactly equal
+        if (tier === "phone" && emailConflict(id) && nm(p.agent.full_name as string | null) !== nm(metaOf(id).name)) return false;
+        return true;
+      };
+      const pickLow = (key: string, dbMap: Map<string, string[]>, raw: string, tier: "email" | "phone") => {
+        for (const id of [...(seenLow.get(key) ?? []), ...(dbMap.get(raw) ?? [])]) if (passes(id, tier)) return id;
+        return undefined;
+      };
       let agentId: string | undefined;
       if (p.sid) agentId = seen.get("s:" + p.sid) ?? bySid.get(p.sid);
       if (!agentId && p.license) agentId = seen.get("l:" + p.license) ?? byLic.get(p.license);
-      if (!agentId && p.email) agentId = seen.get("e:" + p.email) ?? byEmail.get(p.email);
-      if (!agentId && p.phoneKey) agentId = seen.get("p:" + p.phoneKey) ?? byPhone.get(p.phoneKey);
+      if (!agentId && p.email) agentId = pickLow("e:" + p.email, byEmail, p.email, "email");
+      if (!agentId && p.phoneKey) agentId = pickLow("p:" + p.phoneKey, byPhone, p.phoneKey, "phone");
       if (!agentId) { agentId = randomUUID(); isNew.set(agentId, true); }
-      for (const k of idkeys) seen.set(k, agentId);
+      for (const k of idkeys) {
+        if (k.startsWith("e:") || k.startsWith("p:")) {
+          const arr = seenLow.get(k) ?? [];
+          if (!arr.includes(agentId)) seenLow.set(k, [agentId, ...arr]);
+        } else seen.set(k, agentId);
+      }
 
       p.agent.id = agentId;
       finalById.set(agentId, p); // last row for this agent wins
