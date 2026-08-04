@@ -15,6 +15,7 @@ import type {
   LocationField,
   LocationFilter,
   LocationKind,
+  LocEntry,
   OfficeSearchFilter,
   RangeF,
   RangeSide,
@@ -30,6 +31,8 @@ import {
   ieCount,
   rangeCount,
   officeSearchCount,
+  locV,
+  locF,
 } from "@/types/agent-filters";
 
 type RangeLike = { side?: VolumeSide; buckets: string[]; min: string; max: string };
@@ -69,8 +72,8 @@ function LocationSection({ value, onChange }: { value: LocationFilter; onChange:
           value={activeField}
           onValueChange={(v) =>
             bucket === "include"
-              ? onChange({ ...value, field: v as LocationField, values: [] })
-              : onChange({ ...value, excludeField: v as LocationField, excludeValues: [] })
+              ? onChange({ ...value, field: v as LocationField })
+              : onChange({ ...value, excludeField: v as LocationField })
           }
         >
           <SelectTrigger className="h-10 w-32 shrink-0">
@@ -89,14 +92,16 @@ function LocationSection({ value, onChange }: { value: LocationFilter; onChange:
             placeholder={`Search by ${label.toLowerCase()}`}
             query={query}
             setQuery={setQuery}
-            options={options.filter((o) => !value.values.includes(o) && !value.excludeValues.includes(o))}
+            options={options.filter((o) => !value.values.some((x) => locV(x) === o) && !value.excludeValues.some((x) => locV(x) === o))}
             onPick={(v) => {
               const cap = value.values.length + value.excludeValues.length < 50; // hard 50 cap across both buckets
               if (!cap) return;
-              if (bucket === "include" && !value.values.includes(v))
-                onChange({ ...value, values: [...value.values, v], excludeValues: value.excludeValues.filter((x) => x !== v) });
-              if (bucket === "exclude" && !value.excludeValues.includes(v))
-                onChange({ ...value, excludeValues: [...value.excludeValues, v], values: value.values.filter((x) => x !== v) });
+              const same = (x: LocEntry) => locV(x) === v && locF(x, activeField) === activeField;
+              const tagged: LocEntry = { f: activeField, v };
+              if (bucket === "include" && !value.values.some(same))
+                onChange({ ...value, values: [...value.values, tagged], excludeValues: value.excludeValues.filter((x) => !same(x)) });
+              if (bucket === "exclude" && !value.excludeValues.some(same))
+                onChange({ ...value, excludeValues: [...value.excludeValues, tagged], values: value.values.filter((x) => !same(x)) });
               setQuery("");
             }}
           />
@@ -108,8 +113,14 @@ function LocationSection({ value, onChange }: { value: LocationFilter; onChange:
         </span>
         <span>{value.values.length + value.excludeValues.length}/50</span>
       </div>
-      <Chips items={value.values} onRemove={(v) => onChange({ ...value, values: value.values.filter((x) => x !== v) })} />
-      <Chips items={value.excludeValues} tone="exclude" onRemove={(v) => onChange({ ...value, excludeValues: value.excludeValues.filter((x) => x !== v) })} />
+      <Chips
+        items={value.values.map((x) => locV(x) + (locF(x, value.field) !== "city" ? " · " + locF(x, value.field) : ""))}
+        onRemove={(v) => onChange({ ...value, values: value.values.filter((x) => locV(x) + (locF(x, value.field) !== "city" ? " · " + locF(x, value.field) : "") !== v) })}
+      />
+      <Chips
+        items={value.excludeValues.map((x) => locV(x) + (locF(x, value.excludeField ?? value.field) !== "city" ? " · " + locF(x, value.excludeField ?? value.field) : ""))}
+        onRemove={(v) => onChange({ ...value, excludeValues: value.excludeValues.filter((x) => locV(x) + (locF(x, value.excludeField ?? value.field) !== "city" ? " · " + locF(x, value.excludeField ?? value.field) : "") !== v) })}
+      />
       <div className="mt-3 space-y-2.5">
         {LOCATION_KINDS.map(([k, l]) => (
           <label key={k} className="flex items-center gap-2 text-sm text-neutral-800">

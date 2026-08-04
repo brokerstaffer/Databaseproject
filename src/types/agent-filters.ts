@@ -8,12 +8,18 @@ export interface IncludeExclude {
   include: string[];
   exclude: string[];
 }
+// A location pick: a plain string uses the filter's current field; a tagged entry
+// carries its OWN geography level, so one filter can mix city + county + zip + state.
+export type LocEntry = string | { f: LocationField; v: string };
+export const locV = (x: LocEntry): string => (typeof x === "string" ? x : x.v);
+export const locF = (x: LocEntry, fallback: LocationField): LocationField => (typeof x === "string" ? fallback : x.f);
+
 export interface LocationFilter {
   field: LocationField;
   appliesTo: LocationKind[];
-  values: string[];        // include
-  excludeValues: string[]; // exclude (A14) — agents matching any of these are hidden
-  excludeField?: LocationField; // D3: exclude may target a different geography level (defaults to field)
+  values: LocEntry[];        // include (mixed levels allowed)
+  excludeValues: LocEntry[]; // exclude (A14/D3) — agents matching any of these are hidden
+  excludeField?: LocationField; // D3: default level for plain-string excludes
 }
 export interface RangeSide {
   side: VolumeSide;
@@ -167,6 +173,8 @@ export function normalizeFilters(
   if (!merged.savedViews) merged.savedViews = { include: [], exclude: [] };
   else merged.savedViews = { include: merged.savedViews.include ?? [], exclude: merged.savedViews.exclude ?? [] };
   if (!merged.location.excludeValues) merged.location = { ...merged.location, excludeValues: [] };
+  const okEntry = (x: unknown) => typeof x === "string" || (!!x && typeof (x as { v?: unknown }).v === "string" && typeof (x as { f?: unknown }).f === "string");
+  merged.location = { ...merged.location, values: (merged.location.values ?? []).filter(okEntry), excludeValues: (merged.location.excludeValues ?? []).filter(okEntry) };
   if (!merged.location.excludeField) merged.location = { ...merged.location, excludeField: merged.location.field };
   if (!merged.mlsCount || !Array.isArray(merged.mlsCount.buckets)) merged.mlsCount = { buckets: [] };
   delete (merged as Partial<Filters> & { orchClientId?: string }).orchClientId;

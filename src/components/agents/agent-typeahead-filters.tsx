@@ -6,7 +6,8 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { FilterPopoverShell } from "./agent-filters";
-import type { IncludeExclude, LocationField, LocationFilter, LocationKind, OfficeSearchFilter } from "@/types/agent-filters";
+import type { IncludeExclude, LocationField, LocationFilter, LocationKind, LocEntry, OfficeSearchFilter } from "@/types/agent-filters";
+import { locV, locF } from "@/types/agent-filters";
 
 // ---------- helpers ----------
 export function useTypeahead(type: string, field?: string) {
@@ -251,8 +252,10 @@ export function LocationPopover({ value, onChange, officeMode = false }: { value
   const [open, setOpen] = useState(false);
   const [field, setField] = useState<LocationField>(value.field);
   const [kinds, setKinds] = useState<LocationKind[]>(value.appliesTo);
-  const [values, setValues] = useState<string[]>(value.values);
-  const [excluded, setExcluded] = useState<string[]>(value.excludeValues);
+  const [values, setValues] = useState<LocEntry[]>(value.values);
+  const [excluded, setExcluded] = useState<LocEntry[]>(value.excludeValues);
+  // a pick's display label carries its level when it isn't a plain city
+  const lbl = (x: LocEntry, fb: LocationField) => locV(x) + (locF(x, fb) !== "city" ? " · " + locF(x, fb) : "");
   const [exField, setExField] = useState<LocationField>(value.excludeField ?? value.field); // D3
   const [bucket, setBucket] = useState<"include" | "exclude">("include");
   // Precomputed options: instant, ordered by agent count, "City, ST" display with variant
@@ -279,11 +282,13 @@ export function LocationPopover({ value, onChange, officeMode = false }: { value
   const cur = bucket === "include" ? values : excluded;
   const setCur = bucket === "include" ? setValues : setExcluded;
   const setOther = bucket === "include" ? setExcluded : setValues;
+  const curField = bucket === "include" ? field : exField; // the level NEW picks carry
+  const sameEntry = (x: LocEntry, v: string, fb: LocationField) => locV(x) === v && locF(x, fb) === curField;
   const toggleValue = (v: string) => {
-    if (cur.includes(v)) setCur((vs) => vs.filter((x) => x !== v));
+    if (cur.some((x) => sameEntry(x, v, curField))) setCur((vs) => vs.filter((x) => !sameEntry(x, v, curField)));
     else if (values.length + excluded.length < LOCATION_CAP) {
-      setCur((vs) => [...vs, v]);
-      setOther((vs) => vs.filter((x) => x !== v));
+      setCur((vs) => [...vs, { f: curField, v }]);
+      setOther((vs) => vs.filter((x) => !sameEntry(x, v, curField)));
     }
   };
   const selectAllShown = () =>
@@ -293,7 +298,7 @@ export function LocationPopover({ value, onChange, officeMode = false }: { value
       for (const o of options) {
         if (merged.length + otherLen >= LOCATION_CAP) break;
         const bare = o.v.replace(/,\s*[A-Za-z]{2}$/, "");
-        if (!merged.includes(o.v) && !merged.includes(bare)) merged.push(o.v);
+        if (!merged.some((x) => locF(x, curField) === curField && (locV(x) === o.v || locV(x) === bare))) merged.push({ f: curField, v: o.v });
       }
       return merged;
     });
@@ -328,7 +333,8 @@ export function LocationPopover({ value, onChange, officeMode = false }: { value
         <Select
           value={activeField}
           onValueChange={(v) => {
-            if (bucket === "exclude") { setExField(v as LocationField); setExcluded([]); setQuery(""); return; }
+            // switching level KEEPS existing picks — they carry their own level now
+            if (bucket === "exclude") { setExField(v as LocationField); setQuery(""); return; }
             setField(v as LocationField);
             setValues([]);
             setExcluded([]);
@@ -381,13 +387,15 @@ export function LocationPopover({ value, onChange, officeMode = false }: { value
           options.map((o) => {
             // a legacy saved view may hold the bare form ("Towson") of this composite option
             const bare = o.v.replace(/,\s*[A-Za-z]{2}$/, "");
-            const checked = cur.includes(o.v) || cur.includes(bare);
+            const checked = cur.some((x) => locF(x, curField) === curField && (locV(x) === o.v || locV(x) === bare));
             return (
             <label key={o.v} className="flex items-center gap-2 rounded px-1 py-1.5 text-sm text-neutral-800 hover:bg-neutral-50">
               <Checkbox
                 checked={checked}
                 onCheckedChange={() =>
-                  checked ? setCur((vs) => vs.filter((x) => x !== o.v && x !== bare)) : toggleValue(o.v)
+                  checked
+                    ? setCur((vs) => vs.filter((x) => !(locF(x, curField) === curField && (locV(x) === o.v || locV(x) === bare))))
+                    : toggleValue(o.v)
                 }
               />
               <span className="min-w-0 flex-1 truncate">{o.v}</span>
@@ -400,8 +408,8 @@ export function LocationPopover({ value, onChange, officeMode = false }: { value
           })
         )}
       </div>
-      <Chips items={values} onRemove={(v) => setValues(values.filter((x) => x !== v))} />
-      <Chips items={excluded} tone="exclude" onRemove={(v) => setExcluded(excluded.filter((x) => x !== v))} />
+      <Chips items={values.map((x) => lbl(x, field))} onRemove={(v) => setValues(values.filter((x) => lbl(x, field) !== v))} />
+      <Chips items={excluded.map((x) => lbl(x, exField))} tone="exclude" onRemove={(v) => setExcluded(excluded.filter((x) => lbl(x, exField) !== v))} />
       {values.length + excluded.length >= LOCATION_CAP && (
         <p className="mt-1 px-1 text-[11px] text-amber-600">{LOCATION_CAP} locations max — remove some to add more.</p>
       )}
