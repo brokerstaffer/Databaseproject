@@ -71,9 +71,11 @@ function LocationSection({ value, onChange }: { value: LocationFilter; onChange:
         <Select
           value={activeField}
           onValueChange={(v) =>
+            // picks persist across level switches; untagged legacy picks get pinned to the
+            // outgoing level so their meaning never shifts
             bucket === "include"
-              ? onChange({ ...value, field: v as LocationField })
-              : onChange({ ...value, excludeField: v as LocationField })
+              ? onChange({ ...value, field: v as LocationField, values: value.values.map((x) => (typeof x === "string" ? { f: value.field, v: x } : x)) })
+              : onChange({ ...value, excludeField: v as LocationField, excludeValues: value.excludeValues.map((x) => (typeof x === "string" ? { f: value.excludeField ?? value.field, v: x } : x)) })
           }
         >
           <SelectTrigger className="h-10 w-32 shrink-0">
@@ -92,7 +94,11 @@ function LocationSection({ value, onChange }: { value: LocationFilter; onChange:
             placeholder={`Search by ${label.toLowerCase()}`}
             query={query}
             setQuery={setQuery}
-            options={options.filter((o) => !value.values.some((x) => locV(x) === o) && !value.excludeValues.some((x) => locV(x) === o))}
+            options={options.filter(
+              (o) =>
+                !value.values.some((x) => locV(x) === o && locF(x, value.field) === activeField) &&
+                !value.excludeValues.some((x) => locV(x) === o && locF(x, value.excludeField ?? value.field) === activeField),
+            )}
             onPick={(v) => {
               const cap = value.values.length + value.excludeValues.length < 50; // hard 50 cap across both buckets
               if (!cap) return;

@@ -333,11 +333,16 @@ export function LocationPopover({ value, onChange, officeMode = false }: { value
         <Select
           value={activeField}
           onValueChange={(v) => {
-            // switching level KEEPS existing picks — they carry their own level now
-            if (bucket === "exclude") { setExField(v as LocationField); setQuery(""); return; }
+            // switching level KEEPS existing picks — they carry their own level now;
+            // untagged legacy picks get pinned to the outgoing level so their meaning never shifts
+            if (bucket === "exclude") {
+              setExcluded((vs) => vs.map((x) => (typeof x === "string" ? { f: exField, v: x } : x)));
+              setExField(v as LocationField);
+              setQuery("");
+              return;
+            }
+            setValues((vs) => vs.map((x) => (typeof x === "string" ? { f: field, v: x } : x)));
             setField(v as LocationField);
-            setValues([]);
-            setExcluded([]);
             setQuery("");
           }}
         >
