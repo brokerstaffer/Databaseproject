@@ -50,12 +50,13 @@ function Section({ title, count, children }: { title: string; count?: number; ch
 }
 
 // ---------- sections ----------
-function LocationSection({ value, onChange }: { value: LocationFilter; onChange: (v: LocationFilter) => void }) {
+function LocationSection({ value, onChange, mlsIds = [] }: { value: LocationFilter; onChange: (v: LocationFilter) => void; mlsIds?: string[] }) {
   const [bucket, setBucket] = useState<"include" | "exclude">("include");
   // D3: each bucket has its own geography level — exclude may target a finer grain
   const activeField = bucket === "include" ? value.field : (value.excludeField ?? value.field);
   // C2: the counted location options (agent-count ordered, live totals) — same source the popover uses
-  const { query, setQuery, options: locOpts, total, agents } = useLocationOptions(activeField, "agent");
+  // A15: scoped to the MLSs selected in this same drawer, so the two sections stay consistent
+  const { query, setQuery, options: locOpts, total, agents } = useLocationOptions(activeField, "agent", mlsIds);
   const options = locOpts.map((o) => o.v);
   const label = LOCATION_FIELDS.find((f) => f[0] === activeField)?.[1] ?? "City";
   const toggleKind = (k: LocationKind) =>
@@ -515,7 +516,7 @@ export function AllFiltersDrawer({
           <SheetTitle>All filters</SheetTitle>
         </SheetHeader>
         <div className="flex-1 overflow-y-auto">
-          <LocationSection value={draft.location} onChange={(v) => set("location", v)} />
+          <LocationSection value={draft.location} onChange={(v) => set("location", v)} mlsIds={draft.mls.include} />
           <RangeSection title="Sales volume" count={rangeCount(draft.salesVolume)} value={draft.salesVolume} onChange={(v) => set("salesVolume", v as RangeSide)} buckets={SALES_VOLUME_BUCKETS} hasSide prefix="$" />
           <OfficeSearchSection value={draft.officeSearch} onChange={(v) => set("officeSearch", v)} />
           <MlsSection value={draft.mls} onChange={(v) => set("mls", v)} mlsCount={draft.mlsCount} onMlsCount={(v) => set("mlsCount", v)} />

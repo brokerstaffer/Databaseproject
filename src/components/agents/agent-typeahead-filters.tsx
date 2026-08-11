@@ -50,16 +50,19 @@ export interface LocOpt {
   var: number; // how many raw spelling variants collapse into this option
 }
 // Location options: precomputed, agent-count ordered, with live match totals (C2).
-export function useLocationOptions(field: string, scope: "agent" | "office") {
+// A15: when MLSs are selected, the options are scoped to them — only places those MLSs' agents
+// are actually in, counted within them. mlsIds is joined into the key so switching MLS refetches.
+export function useLocationOptions(field: string, scope: "agent" | "office", mlsIds: string[] = []) {
   const [query, setQuery] = useState("");
   const [options, setOptions] = useState<LocOpt[]>([]);
   const [total, setTotal] = useState(0);   // matching option groups
   const [agents, setAgents] = useState(0); // agents (offices) covered by those groups
+  const mlsKey = [...mlsIds].sort().join(",");
   useEffect(() => {
     let active = true;
     const t = setTimeout(async () => {
       try {
-        const res = await fetch(`/api/search/options?type=location&field=${field}&scope=${scope}&q=${encodeURIComponent(query)}`);
+        const res = await fetch(`/api/search/options?type=location&field=${field}&scope=${scope}&q=${encodeURIComponent(query)}${mlsKey ? `&mls=${encodeURIComponent(mlsKey)}` : ""}`);
         const json = await res.json();
         if (active) {
           setOptions(Array.isArray(json.options) ? (json.options as LocOpt[]) : []);
@@ -74,7 +77,7 @@ export function useLocationOptions(field: string, scope: "agent" | "office") {
       active = false;
       clearTimeout(t);
     };
-  }, [field, scope, query]);
+  }, [field, scope, query, mlsKey]);
   return { query, setQuery, options, total, agents };
 }
 
@@ -248,7 +251,7 @@ export const LOCATION_KINDS: [LocationKind, string][] = [
   ["home", "Home location"],
 ];
 
-export function LocationPopover({ value, onChange, officeMode = false }: { value: LocationFilter; onChange: (v: LocationFilter) => void; officeMode?: boolean }) {
+export function LocationPopover({ value, onChange, officeMode = false, mlsIds = [] }: { value: LocationFilter; onChange: (v: LocationFilter) => void; officeMode?: boolean; mlsIds?: string[] }) {
   const [open, setOpen] = useState(false);
   const [field, setField] = useState<LocationField>(value.field);
   const [kinds, setKinds] = useState<LocationKind[]>(value.appliesTo);
@@ -261,7 +264,8 @@ export function LocationPopover({ value, onChange, officeMode = false }: { value
   // Precomputed options: instant, ordered by agent count, "City, ST" display with variant
   // counts and live totals (C2). Office view sees office locations only (A8).
   const activeField = bucket === "include" ? field : exField; // D3: each bucket has its own geography level
-  const { query, setQuery, options, total, agents } = useLocationOptions(activeField, officeMode ? "office" : "agent");
+  // A15: options follow the selected MLSs (agent scope only — the per-MLS table is agent-grained)
+  const { query, setQuery, options, total, agents } = useLocationOptions(activeField, officeMode ? "office" : "agent", mlsIds);
 
   useEffect(() => {
     if (open) {
