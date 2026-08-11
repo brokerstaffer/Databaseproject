@@ -616,8 +616,14 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
               <LicensePopover value={filters.license} onChange={(v) => setF("license", v)} />
               <NamePopover value={filters.name} onChange={(v) => setF("name", v)} />
               <ContactPopover value={filters.contact} onChange={(v) => setF("contact", v)} />
-              <SavedViewsPopover value={filters.savedViews} onChange={(v) => setF("savedViews", v)} />
             </>
+          )}
+          {/* A21: saved views apply to every AGENT-grained mode. Agent, MLS and Location all
+              build their WHERE with fn_agent_where, which resolves saved-view references —
+              so the filter works in all three and only the UI was gating it to Agent.
+              Office/Brand use fn_office_where, which has no saved-view support yet. */}
+          {(mode === "agent" || mode === "mls" || mode === "location") && (
+            <SavedViewsPopover value={filters.savedViews} onChange={(v) => setF("savedViews", v)} />
           )}
           {(mode === "office" || mode === "brand") && (
             <>

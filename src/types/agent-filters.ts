@@ -194,7 +194,8 @@ export function activeFilterCount(f: Filters, mode: "agent" | "office" | "brand"
     officeSearchCount(f.officeSearch) +
     rangeCount(f.closedUnits) +
     (f.orchClientIds.length ? 1 : 0);
-  if (mode === "location" || mode === "mls") return shared;
+  // Location + MLS are agent-grained (fn_agent_where), so saved views narrow them too (A21).
+  if (mode === "location" || mode === "mls") return shared + f.savedViews.include.length + f.savedViews.exclude.length;
   // office + brand views also carry the MLS filter (office_mls) and the per-office agent count
   if (mode === "brand" || mode === "office") return shared + f.mls.include.length + f.mls.exclude.length + rangeCount(f.agentCount);
   return (
