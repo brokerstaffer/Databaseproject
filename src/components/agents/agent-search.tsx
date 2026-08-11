@@ -232,7 +232,7 @@ const MLS_MODE_COLUMNS: Col[] = [
   { key: "locOffices", label: "Offices", sortBy: "offices", align: "right", render: (r) => numv(r.offices as number | null) },
   { key: "vol", label: "Sales volume", sortBy: "sales_volume", align: "right", render: (r) => usd(r.sales_volume) },
   { key: "units", label: "Units", sortBy: "units", align: "right", render: (r) => numv(r.units) },
-  { key: "updated", label: "Data refreshed", render: (r) => na(r.updated as string | null) },
+  { key: "updated", label: "Data refreshed", sortBy: "updated", defaultDir: "desc", render: (r) => na(r.updated as string | null) },
 ];
 
 const COL_BY_KEY: Record<string, Col> = Object.fromEntries(COLUMNS.map((c) => [c.key, c]));
