@@ -655,7 +655,11 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
                   setPage(1);
                 }}
               />
-              <RangePopover label="Agents in office" suffix="#" buckets={COUNT_BUCKETS} value={{ side: "all", ...filters.agentCount }} onChange={(v) => setF("agentCount", { buckets: v.buckets, min: v.min, max: v.max })} />
+              {/* A19: named "Agent Count" in both Office and Brand views. It ranges on
+                  offices.agent_count either way — in Brand view that is applied per office
+                  BEFORE the offices are grouped into brands, so it selects brands by the
+                  size of their individual offices, not by their brand-wide headcount. */}
+              <RangePopover label="Agent Count" suffix="#" buckets={COUNT_BUCKETS} value={{ side: "all", ...filters.agentCount }} onChange={(v) => setF("agentCount", { buckets: v.buckets, min: v.min, max: v.max })} />
             </>
           )}
           {/* office mode always ranges on total units — the List/Buy split is agent-only */}
