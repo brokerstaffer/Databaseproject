@@ -49,6 +49,16 @@ export async function POST(req: NextRequest) {
   const agentIds = [...new Set(rows.map((r) => r.id as string).filter(Boolean))];
   if (agentIds.length === 0) return NextResponse.json({ error: "No agents to send." }, { status: 400 });
 
+  // A22: shuffle before queueing. gatherExportRows returns ids ordered by sales_volume desc,
+  // and the worker claims items in insertion order — so without this the highest-producing
+  // agents were all contacted first, in one block at the front of the campaign. Randomising
+  // spreads them across the send window. Which agents go is unchanged (the filter/range/
+  // selection already decided that); only the order they are contacted in changes.
+  for (let i = agentIds.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [agentIds[i], agentIds[j]] = [agentIds[j], agentIds[i]];
+  }
+
   const pool = getPool();
 
   // A5 scoped sends: if the search was MLS-scoped (selected MLSs with near-complete per-MLS
