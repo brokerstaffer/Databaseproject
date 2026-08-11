@@ -11,6 +11,7 @@ import { toast } from "sonner";
 import type { Filters } from "@/types/agent-filters";
 import type { DataSource, SearchMode } from "@/types/agent";
 import { EXPORT_COLUMNS } from "@/lib/export/columns";
+import { EXPORT_MAX_ROWS, SEND_CONFIRM_THRESHOLD } from "@/lib/export/limits";
 
 interface PortalClientOpt {
   name: string;
@@ -69,6 +70,7 @@ export function ExportDialog({
   const [to, setTo] = useState("");
   const [cols, setCols] = useState<Set<string>>(new Set(ALL_KEYS));
   const [busy, setBusy] = useState(false);
+  const [confirmedBig, setConfirmedBig] = useState(false); // A14b: explicit opt-in for large campaign sends
 
   // Portal clients come from the portal's own admin directory (names only — tokens stay
   // server-side); fetched lazily the first time the portal method is picked.
@@ -91,6 +93,7 @@ export function ExportDialog({
   // the operator explicitly does NOT want to touch). Campaign picks start fresh per open.
   useEffect(() => {
     if (open) {
+      setConfirmedBig(false);
       setSelectedClientIds(new Set(filters.orchClientMode === "exclude" ? [] : filters.orchClientIds ?? []));
       setSelectedCampaigns(new Set());
       knownCampaignIds.current = new Set();
@@ -175,17 +178,33 @@ export function ExportDialog({
   // In Office mode the export is "all agents belonging to the chosen offices".
   const office = mode === "office";
   const hasSel = selectedIds.length > 0;
+
+  // A14b: say what will ACTUALLY go out. gatherExportRows caps every export/send at
+  // EXPORT_MAX_ROWS, but this line used to read "all 1,130,286 agents" while the server
+  // quietly sent the first 100,000 — the count and the action disagreed, with no warning.
+  // Ranges narrow the request first; an explicit row selection bypasses the cap entirely
+  // (the caller asked for exactly those ids), so it is reported as-is.
+  const rangeCount = from || to ? Math.max((Number(to) || total) - (Number(from) || 1) + 1, 0) : total;
+  const requested = hasSel ? selectedIds.length : rangeCount;
+  const willSend = hasSel ? requested : Math.min(requested, EXPORT_MAX_ROWS);
+  const isCapped = !hasSel && requested > EXPORT_MAX_ROWS;
+
   const scope = hasSel
     ? office
       ? `all agents in ${selectedIds.length} selected office${selectedIds.length > 1 ? "s" : ""}`
-      : `${selectedIds.length} selected agents`
-    : from || to
-    ? office
-      ? `all agents in offices ranked ${from || 1}–${to || total}`
-      : `agents ${from || 1}–${to || total}`
+      : `${selectedIds.length.toLocaleString()} selected agents`
     : office
-    ? `all agents in the ${total.toLocaleString()} matching offices`
+    ? `agents from ${Math.min(rangeCount, EXPORT_MAX_ROWS).toLocaleString()} offices${isCapped ? ` (of ${rangeCount.toLocaleString()})` : ""}`
+    : isCapped
+    ? `${EXPORT_MAX_ROWS.toLocaleString()} of ${requested.toLocaleString()} agents`
+    : from || to
+    ? `agents ${from || 1}–${to || total}`
     : `all ${total.toLocaleString()} agents`;
+
+  // Campaign sends cost real money per agent (BetterEnrich + Instantly + OpenAI) and put leads
+  // into a live sending domain, so a big one has to be confirmed deliberately. CSV downloads and
+  // the portal path don't need this — the portal enforces its own 5,000 cap server-side.
+  const needsConfirm = method === "campaign" && willSend > SEND_CONFIRM_THRESHOLD;
 
   const reqBody = () => ({
     mode,
@@ -592,14 +611,38 @@ export function ExportDialog({
             {method === "csv" ? "Exporting" : "Sending"}: <span className="font-medium text-neutral-700">{scope}</span>
             {method === "csv" ? ` · ${cols.size} columns` : ""}
           </p>
+
+          {/* A14b: the cap is real and was previously invisible — say so rather than claiming
+              to send everything and quietly truncating. */}
+          {isCapped && (
+            <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              Capped at {EXPORT_MAX_ROWS.toLocaleString()} per {method === "csv" ? "export" : "send"}. The remaining{" "}
+              {(requested - EXPORT_MAX_ROWS).toLocaleString()} are not included — narrow the filters, or use the range
+              boxes above to take the rest in a second batch.
+            </p>
+          )}
+
+          {/* A14b: a six-figure campaign send costs real money per agent and drops leads into a
+              live sending domain, so it has to be an explicit decision, not a stray click. */}
+          {needsConfirm && (
+            <label className="flex items-start gap-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-800">
+              <Checkbox checked={confirmedBig} onCheckedChange={() => setConfirmedBig((v) => !v)} className="mt-0.5" />
+              <span>
+                This will enrich and send <span className="font-semibold">{willSend.toLocaleString()} agents</span>. Each one
+                is billed for email lookup and verification, and the leads go into a live campaign. Tick to confirm.
+              </span>
+            </label>
+          )}
         </div>
         <DialogFooter>
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
           {method === "campaign" ? (
-            <Button onClick={sendCampaign} disabled={busy || selectedCampaigns.size === 0}>
-              {busy ? "Queueing…" : `Send to campaign${selectedCampaigns.size > 1 ? "s" : ""}`}
+            // A14b: the button states the real number, and a large send stays disabled until
+            // the confirmation above is ticked.
+            <Button onClick={sendCampaign} disabled={busy || selectedCampaigns.size === 0 || (needsConfirm && !confirmedBig)}>
+              {busy ? "Queueing…" : `Send ${willSend.toLocaleString()} to campaign${selectedCampaigns.size > 1 ? "s" : ""}`}
             </Button>
           ) : method === "portal" ? (
             <Button onClick={sendPortal} disabled={busy || !portalClient}>

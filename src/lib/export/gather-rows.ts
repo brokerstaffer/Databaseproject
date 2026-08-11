@@ -1,5 +1,6 @@
 import { getPool } from "@/lib/db/pool";
 import { sanitizeSavedViews } from "@/lib/filters/sanitize-saved-views";
+import { EXPORT_MAX_ROWS } from "@/lib/export/limits";
 
 // Shared row-gathering for both export paths (CSV + campaign send) so they can't drift.
 // The export always produces AGENT rows. In Office mode it expands the chosen offices into
@@ -53,7 +54,7 @@ export async function gatherExportRows(args: GatherArgs): Promise<Record<string,
   const from = Number(rangeFrom) > 0 ? Number(rangeFrom) : 1;
   const to = Number(rangeTo) > 0 ? Number(rangeTo) : null;
   if (to && to < from) return []; // inverted range -> empty, not a negative LIMIT error
-  const limit = to ? to - from + 1 : 100000;
+  const limit = to ? to - from + 1 : EXPORT_MAX_ROWS;
   const offset = Math.max(from - 1, 0);
   const hasSelection = Array.isArray(selectedIds) && selectedIds.length > 0;
   const pool = getPool();
@@ -66,14 +67,14 @@ export async function gatherExportRows(args: GatherArgs): Promise<Record<string,
     } else {
       const { rows } = await pool.query(
         `select fn_filter_ids('office', $1, $2::jsonb, 'sales_volume', 'desc', $3, $4) as ids`,
-        [source, JSON.stringify(filters), Math.min(limit, 100000), offset]
+        [source, JSON.stringify(filters), Math.min(limit, EXPORT_MAX_ROWS), offset]
       );
       officeIds = (rows[0]?.ids ?? []) as string[];
     }
     if (officeIds.length === 0) return [];
-    // Cap total exported agents at 100k (an office can hold many agents).
+    // Cap total exported agents at EXPORT_MAX_ROWS (an office can hold many agents).
     const { rows } = await pool.query(
-      `${AGENT_SELECT} where a.office_id = any($1::uuid[]) order by a.sales_volume desc nulls last limit 100000`,
+      `${AGENT_SELECT} where a.office_id = any($1::uuid[]) order by a.sales_volume desc nulls last limit ${EXPORT_MAX_ROWS}`,
       [officeIds]
     );
     return rows as Record<string, unknown>[];
@@ -85,7 +86,7 @@ export async function gatherExportRows(args: GatherArgs): Promise<Record<string,
   }
   const { rows } = await pool.query(
     `select fn_filter_ids('agent', $1, $2::jsonb, 'sales_volume', 'desc', $3, $4) as ids`,
-    [source, JSON.stringify(filters), Math.min(limit, 100000), offset]
+    [source, JSON.stringify(filters), Math.min(limit, EXPORT_MAX_ROWS), offset]
   );
   const ids = (rows[0]?.ids ?? []) as string[];
   if (ids.length === 0) return [];
