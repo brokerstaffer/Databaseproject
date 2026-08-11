@@ -20,7 +20,7 @@ import { SavedViews } from "./saved-views";
 import { EditColumnsModal } from "./edit-columns";
 import { AgentProfileDialog } from "./agent-profile";
 import { AllFiltersDrawer } from "./all-filters-drawer";
-import { DEFAULT_FILTERS, SALES_VOLUME_BUCKETS, COUNT_BUCKETS, YEAR_BUCKETS, GCI_BUCKETS, activeFilterCount, normalizeFilters } from "@/types/agent-filters";
+import { DEFAULT_FILTERS, SALES_VOLUME_BUCKETS, COUNT_BUCKETS, activeFilterCount, normalizeFilters } from "@/types/agent-filters";
 import type { Filters } from "@/types/agent-filters";
 import { useNameSearch } from "@/lib/stores/name-search";
 
@@ -636,13 +636,11 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
           )}
           {/* office mode always ranges on total units — the List/Buy split is agent-only */}
           <RangePopover label="Closed units" hasSide={mode === "agent"} prefix="#" buckets={COUNT_BUCKETS} value={filters.closedUnits} onChange={(v) => setF("closedUnits", v)} />
+          {/* A17: Closed transactions, Est. time in industry and Approx. GCI live in the
+              All-filters drawer only — the top bar was too crowded to scan. They are still
+              fully applied filters; the "All filters" badge counts them either way. */}
           {mode === "agent" && (
-            <>
-              <RangePopover label="Closed transactions" hasSide prefix="#" buckets={COUNT_BUCKETS} value={filters.closedTransactions} onChange={(v) => setF("closedTransactions", v)} />
-              <RangePopover label="Est. time in industry" suffix="yrs" buckets={YEAR_BUCKETS} value={{ side: "all", ...filters.estTimeInIndustry }} onChange={(v) => setF("estTimeInIndustry", { buckets: v.buckets, min: v.min, max: v.max })} />
-              <RangePopover label="Approx. GCI" prefix="$" buckets={GCI_BUCKETS} value={{ side: "all", ...filters.approxGci }} onChange={(v) => setF("approxGci", { buckets: v.buckets, min: v.min, max: v.max })} />
-              <ZillowRealtorPopover value={filters.zillowRealtor ?? DEFAULT_FILTERS.zillowRealtor} onChange={(v) => setF("zillowRealtor", v)} />
-            </>
+            <ZillowRealtorPopover value={filters.zillowRealtor ?? DEFAULT_FILTERS.zillowRealtor} onChange={(v) => setF("zillowRealtor", v)} />
           )}
           {mode === "agent" && (
             <button
