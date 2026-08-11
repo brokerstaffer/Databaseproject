@@ -40,3 +40,37 @@ export async function GET(req: NextRequest) {
   }
   return NextResponse.json({ options: data ?? [] });
 }
+
+// A15.B: the same options, but computed against the CURRENT filters ("Match my filters").
+// POST rather than GET because the filter payload is a whole object and would not survive a
+// query string. Falls back to the GET behaviour whenever scoping cannot help — see
+// fn_facet_options: it drops the filter being built (so picking Miami does not collapse the
+// city list to Miami), serves the precomputed lists when nothing else narrows or when the set
+// is still most of the database, and only aggregates live in between.
+export async function POST(req: NextRequest) {
+  const body = await req.json().catch(() => ({}));
+  const type = typeof body?.type === "string" ? body.type : "";
+  const field = typeof body?.field === "string" ? body.field : null;
+  const q = typeof body?.q === "string" ? body.q : "";
+  const scope = body?.scope === "office" ? "office" : "agent";
+  const source = ["all", "courted", "zillow_realtor"].includes(body?.source) ? body.source : "all";
+  const filters = body?.filters && typeof body.filters === "object" ? body.filters : {};
+
+  const admin = createAdminClient();
+  // Office/Brand views run on fn_office_where, which fn_facet_options does not cover, so they
+  // keep the unscoped lists rather than silently getting agent-grained answers.
+  const useFacets = body?.matchFilters !== false && scope === "agent";
+
+  const { data, error } = useFacets
+    ? await admin.rpc("fn_facet_options", { p_type: type, p_q: q, p_field: field, p_source: source, p_filters: filters })
+    : await admin.rpc("fn_search_options", { p_type: type, p_field: field, p_q: q, p_scope: scope, p_mls: null });
+
+  if (error) {
+    console.error("facet options RPC error:", error);
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+  if (type === "location" && data && !Array.isArray(data)) {
+    return NextResponse.json({ ...data, scoped: useFacets });
+  }
+  return NextResponse.json({ options: data ?? [], scoped: useFacets });
+}

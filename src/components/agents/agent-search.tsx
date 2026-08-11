@@ -387,6 +387,12 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
   const activeColumns = mode === "office" ? OFFICE_COLUMNS : mode === "brand" ? BRAND_COLUMNS : mode === "location" ? LOC_MODE_COLUMNS : mode === "mls" ? MLS_MODE_COLUMNS : visibleColumns;
   const highlightTerm = (filters.nameQuery ?? "").trim();
 
+  // A15.B: what the option dropdowns narrow themselves against. `enabled` is the shared
+  // "Match my filters" switch; each filter's own values are excluded server-side, so picking
+  // one city never hides the others. Agent-grained modes only — Office/Brand run on a
+  // different engine and keep their full lists.
+  const facets = { filters, source, enabled: mode === "agent" || mode === "mls" || mode === "location" };
+
   // (nameQuery is a find/highlight tool, not a filter, so it does not count here.)
   const filterCount = activeFilterCount(filters, mode);
   // Columns whose filter is active — their headers/cells get a light-gray tint.
@@ -616,15 +622,16 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
           <ClientPopover value={filters.orchClientIds} clientMode={filters.orchClientMode} onChange={(ids, m) => { setFilters((p) => ({ ...p, orchClientIds: ids, orchClientMode: m })); setPage(1); }} />
           {/* Office/Brand views filter OFFICES (office locations only); Agent, MLS and
               Location views filter AGENTS — all three location kinds apply (B8 follow-up). */}
-          <LocationPopover value={filters.location} onChange={(v) => setF("location", v)} officeMode={mode === "office" || mode === "brand"} mlsIds={filters.mls.include} />
+          <LocationPopover value={filters.location} onChange={(v) => setF("location", v)} officeMode={mode === "office" || mode === "brand"} mlsIds={filters.mls.include} facets={facets} />
           <RangePopover label="Sales volume" hasSide prefix="$" buckets={SALES_VOLUME_BUCKETS} value={filters.salesVolume} onChange={(v) => setF("salesVolume", v)} />
-          <OfficeSearchPopover value={filters.officeSearch} onChange={(v) => setF("officeSearch", v)} />
+          <OfficeSearchPopover value={filters.officeSearch} onChange={(v) => setF("officeSearch", v)} facets={facets} />
           {mode === "agent" && (
             <>
               <MlsPopover
                 value={filters.mls}
                 multiMls={filters.multiMls}
                 mlsCount={filters.mlsCount}
+                facets={facets}
                 onChange={(v, multi, mc) => {
                   setFilters((f) => ({ ...f, mls: v, multiMls: multi, mlsCount: mc }));
                   setPage(1);

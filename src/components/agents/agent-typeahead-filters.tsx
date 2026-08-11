@@ -8,21 +8,39 @@ import { cn } from "@/lib/utils";
 import { FilterPopoverShell } from "./agent-filters";
 import type { IncludeExclude, LocationField, LocationFilter, LocationKind, LocEntry, OfficeSearchFilter } from "@/types/agent-filters";
 import { locV, locF } from "@/types/agent-filters";
+import { useMatchFilters } from "@/lib/stores/match-filters";
 
 // ---------- helpers ----------
-export function useTypeahead(type: string, field?: string) {
+// A15.B: pass `facets` to have the options reflect the other active filters ("Match my
+// filters"). The filter this list belongs to is excluded server-side, so choosing one brand
+// never hides the others.
+export function useTypeahead(
+  type: string,
+  field?: string,
+  facets?: { filters: unknown; source: string; enabled: boolean }
+) {
   const [query, setQuery] = useState("");
   const [options, setOptions] = useState<string[]>([]);
   const [counts, setCounts] = useState<Record<string, number>>({}); // option -> agent reach (B2; brand/office)
   const [total, setTotal] = useState(0); // count of the unfiltered list = "total available"
+  const [scoped, setScoped] = useState(false);
+  const useFacets = !!facets?.enabled;
+  const facetKey = useFacets ? JSON.stringify(facets?.filters ?? {}) + "|" + (facets?.source ?? "") : "";
   useEffect(() => {
     let active = true;
     const t = setTimeout(async () => {
       const p = new URLSearchParams({ type, q: query });
       if (field) p.set("field", field);
       try {
-        const res = await fetch(`/api/search/options?${p.toString()}`);
+        const res = useFacets
+          ? await fetch("/api/search/options", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ type, field, q: query, scope: "agent", source: facets?.source, filters: facets?.filters, matchFilters: true }),
+            })
+          : await fetch(`/api/search/options?${p.toString()}`);
         const json = await res.json();
+        if (active) setScoped(!!json.scoped);
         if (active) {
           const raw = Array.isArray(json.options) ? (json.options as (string | { v: string; n?: number })[]) : [];
           const opts = raw.map((o) => (typeof o === "string" ? o : o.v));
@@ -40,8 +58,11 @@ export function useTypeahead(type: string, field?: string) {
       active = false;
       clearTimeout(t);
     };
-  }, [type, field, query]);
-  return { query, setQuery, options, counts, total };
+    // facets.filters is a fresh object every render, so it is keyed on the serialised facetKey
+    // instead — depending on the object itself would refetch in a loop.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [type, field, query, useFacets, facetKey]);
+  return { query, setQuery, options, counts, total, scoped };
 }
 
 export interface LocOpt {
@@ -52,22 +73,40 @@ export interface LocOpt {
 // Location options: precomputed, agent-count ordered, with live match totals (C2).
 // A15: when MLSs are selected, the options are scoped to them — only places those MLSs' agents
 // are actually in, counted within them. mlsIds is joined into the key so switching MLS refetches.
-export function useLocationOptions(field: string, scope: "agent" | "office", mlsIds: string[] = []) {
+// A15.B: with "Match my filters" on, the options come from fn_facet_options instead, computed
+// against every OTHER active filter (the location filter itself is excluded server-side, so
+// picking one city never hides the rest). `scoped` reports whether the answer was narrowed.
+export function useLocationOptions(
+  field: string,
+  scope: "agent" | "office",
+  mlsIds: string[] = [],
+  facets?: { filters: unknown; source: string; enabled: boolean }
+) {
   const [query, setQuery] = useState("");
   const [options, setOptions] = useState<LocOpt[]>([]);
   const [total, setTotal] = useState(0);   // matching option groups
   const [agents, setAgents] = useState(0); // agents (offices) covered by those groups
+  const [scoped, setScoped] = useState(false);
   const mlsKey = [...mlsIds].sort().join(",");
+  const useFacets = !!facets?.enabled && scope === "agent";
+  const facetKey = useFacets ? JSON.stringify(facets?.filters ?? {}) + "|" + (facets?.source ?? "") : "";
   useEffect(() => {
     let active = true;
     const t = setTimeout(async () => {
       try {
-        const res = await fetch(`/api/search/options?type=location&field=${field}&scope=${scope}&q=${encodeURIComponent(query)}${mlsKey ? `&mls=${encodeURIComponent(mlsKey)}` : ""}`);
+        const res = useFacets
+          ? await fetch("/api/search/options", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ type: "location", field, q: query, scope, source: facets?.source, filters: facets?.filters, matchFilters: true }),
+            })
+          : await fetch(`/api/search/options?type=location&field=${field}&scope=${scope}&q=${encodeURIComponent(query)}${mlsKey ? `&mls=${encodeURIComponent(mlsKey)}` : ""}`);
         const json = await res.json();
         if (active) {
           setOptions(Array.isArray(json.options) ? (json.options as LocOpt[]) : []);
           setTotal(json.total ?? 0);
           setAgents(json.agents ?? 0);
+          setScoped(!!json.scoped);
         }
       } catch {
         /* ignore */
@@ -77,8 +116,27 @@ export function useLocationOptions(field: string, scope: "agent" | "office", mls
       active = false;
       clearTimeout(t);
     };
-  }, [field, scope, query, mlsKey]);
-  return { query, setQuery, options, total, agents };
+    // facets.filters is a fresh object every render, so it is keyed on the serialised facetKey
+    // instead — depending on the object itself would refetch in a loop.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [field, scope, query, mlsKey, useFacets, facetKey]);
+  return { query, setQuery, options, total, agents, scoped };
+}
+
+// A15.B: the "Match my filters" switch. One shared setting across Location / MLS / Office
+// Search, so they can't disagree. The trailing note says which list you are actually looking
+// at — scoped, or everything — so the state is never ambiguous.
+export function MatchFiltersRow({ scoped, unit = "options" }: { scoped: boolean; unit?: string }) {
+  const [on, setOn] = useMatchFilters();
+  return (
+    <label className="mb-2 flex items-center gap-2 rounded-lg bg-neutral-50 px-2 py-1.5 text-xs text-neutral-700">
+      <Checkbox checked={on} onCheckedChange={() => setOn(!on)} aria-label="Match my filters" />
+      Match my filters
+      <span className="ml-auto text-neutral-400">
+        {!on ? `all ${unit}` : scoped ? `${unit} for your filters` : `no other filters applied`}
+      </span>
+    </label>
+  );
 }
 
 // Plain search input (no dropdown) — pairs with the always-visible CheckList below it.
@@ -251,7 +309,7 @@ export const LOCATION_KINDS: [LocationKind, string][] = [
   ["home", "Home location"],
 ];
 
-export function LocationPopover({ value, onChange, officeMode = false, mlsIds = [] }: { value: LocationFilter; onChange: (v: LocationFilter) => void; officeMode?: boolean; mlsIds?: string[] }) {
+export function LocationPopover({ value, onChange, officeMode = false, mlsIds = [], facets }: { value: LocationFilter; onChange: (v: LocationFilter) => void; officeMode?: boolean; mlsIds?: string[]; facets?: { filters: unknown; source: string; enabled: boolean } }) {
   const [open, setOpen] = useState(false);
   const [field, setField] = useState<LocationField>(value.field);
   const [kinds, setKinds] = useState<LocationKind[]>(value.appliesTo);
@@ -265,7 +323,7 @@ export function LocationPopover({ value, onChange, officeMode = false, mlsIds = 
   // counts and live totals (C2). Office view sees office locations only (A8).
   const activeField = bucket === "include" ? field : exField; // D3: each bucket has its own geography level
   // A15: options follow the selected MLSs (agent scope only — the per-MLS table is agent-grained)
-  const { query, setQuery, options, total, agents } = useLocationOptions(activeField, officeMode ? "office" : "agent", mlsIds);
+  const { query, setQuery, options, total, agents, scoped } = useLocationOptions(activeField, officeMode ? "office" : "agent", mlsIds, facets);
 
   useEffect(() => {
     if (open) {
@@ -328,6 +386,7 @@ export function LocationPopover({ value, onChange, officeMode = false, mlsIds = 
         setOpen(false);
       }}
     >
+      {!officeMode && <MatchFiltersRow scoped={scoped} unit="locations" />}
       <div className="mb-2 flex items-center gap-6">
         {/* Mode-only radios (A14): steer NEW picks; existing chips keep their bucket. */}
         <RadioOpt label="Include" on={bucket === "include"} onClick={() => setBucket("include")} />
@@ -439,7 +498,7 @@ export function LocationPopover({ value, onChange, officeMode = false, mlsIds = 
 }
 
 // ---------- Office Search (Brand + Office, grouped include/exclude) ----------
-export function OfficeSearchPopover({ value, onChange }: { value: OfficeSearchFilter; onChange: (v: OfficeSearchFilter) => void }) {
+export function OfficeSearchPopover({ value, onChange, facets }: { value: OfficeSearchFilter; onChange: (v: OfficeSearchFilter) => void; facets?: { filters: unknown; source: string; enabled: boolean } }) {
   const [open, setOpen] = useState(false);
   const [entity, setEntity] = useState<"brand" | "office">("brand");
   const [mode, setMode] = useState<"include" | "exclude">("include");
@@ -447,7 +506,7 @@ export function OfficeSearchPopover({ value, onChange }: { value: OfficeSearchFi
   const [bExc, setBExc] = useState<string[]>(value.brand.exclude);
   const [oInc, setOInc] = useState<string[]>(value.office.include);
   const [oExc, setOExc] = useState<string[]>(value.office.exclude);
-  const { query, setQuery, options, counts, total } = useTypeahead(entity);
+  const { query, setQuery, options, counts, total, scoped } = useTypeahead(entity, undefined, facets);
 
   useEffect(() => {
     if (open) {
@@ -493,6 +552,7 @@ export function OfficeSearchPopover({ value, onChange }: { value: OfficeSearchFi
         setOpen(false);
       }}
     >
+      <MatchFiltersRow scoped={scoped} unit={entity === "brand" ? "brands" : "offices"} />
       <div className="flex items-center gap-4">
         <Select
           value={entity}
@@ -555,12 +615,14 @@ export function MlsPopover({
   mlsCount,
   onChange,
   officeMode = false, // office/brand views: hide the agent-only extras (multi-MLS, count pills)
+  facets,
 }: {
   value: IncludeExclude;
   multiMls: boolean;
   mlsCount: { buckets: string[] };
   onChange: (v: IncludeExclude, multiMls: boolean, mlsCount: { buckets: string[] }) => void;
   officeMode?: boolean;
+  facets?: { filters: unknown; source: string; enabled: boolean };
 }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
@@ -580,15 +642,26 @@ export function MlsPopover({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
+  // A15.B: with "Match my filters" on, offer only the MLSs present in the current agent set
+  const useFacets = !!facets?.enabled && !officeMode;
+  const facetKey = useFacets ? JSON.stringify(facets?.filters ?? {}) + "|" + (facets?.source ?? "") : "";
+  const [scopedMls, setScopedMls] = useState(false);
   useEffect(() => {
     let active = true;
     const t = setTimeout(async () => {
       try {
-        const res = await fetch(`/api/search/options?type=mls&q=${encodeURIComponent(q)}`);
+        const res = useFacets
+          ? await fetch("/api/search/options", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ type: "mls", q, scope: "agent", source: facets?.source, filters: facets?.filters, matchFilters: true }),
+            })
+          : await fetch(`/api/search/options?type=mls&q=${encodeURIComponent(q)}`);
         const json = await res.json();
         const opts = Array.isArray(json.options) ? (json.options as MlsItem[]) : [];
         if (active) {
           setItems(opts);
+          setScopedMls(!!json.scoped);
           if (q.trim() === "") setTotal(opts.length); // unfiltered list = the total MLS count
         }
       } catch {
@@ -599,7 +672,10 @@ export function MlsPopover({
       active = false;
       clearTimeout(t);
     };
-  }, [q]);
+    // facets.filters is a fresh object every render, so it is keyed on the serialised facetKey
+    // instead — depending on the object itself would refetch in a loop.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q, useFacets, facetKey]);
 
   useEffect(() => {
     let active = true;
@@ -645,6 +721,7 @@ export function MlsPopover({
         setOpen(false);
       }}
     >
+      {!officeMode && <MatchFiltersRow scoped={scopedMls} unit="MLSs" />}
       {/* A5: isolate agents affiliated with more than one MLS (agent view only) */}
       {!officeMode && (
         <label className="mb-2 flex items-center gap-2 text-sm text-neutral-800">
