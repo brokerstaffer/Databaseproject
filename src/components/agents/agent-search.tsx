@@ -25,6 +25,10 @@ import type { Filters } from "@/types/agent-filters";
 import { useNameSearch } from "@/lib/stores/name-search";
 
 const PAGE_SIZES = [20, 50, 100];
+// Ceiling for a single search request. Comfortably above the slowest real filter (the location
+// EXCLUDE path is ~8 s) but finite, so a stalled request can't leave the spinner running with
+// nothing to end it. On expiry the attempt is abandoned and retried once; see fetchData.
+const REQUEST_TIMEOUT_MS = 45_000;
 
 // ---------- formatters ----------
 function usdShort(n: number | null | undefined): string {
@@ -469,39 +473,70 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
   const scrollTopRef = useRef(0);
   const jumpTopRef = useRef(false); // pagination should land at the top of the new page
 
+  // A FAILED REQUEST MUST NEVER BE RENDERED AS A RESULT.
+  //
+  // This used to read the body without checking res.ok. An error response is {error: "..."}
+  // with no data/totalCount, so "json.data ?? []" and "json.totalCount ?? 0" turned any failure
+  // -- a timeout, a 500, a dropped connection -- into a confident "0 Agents found · $0 Sales
+  // volume", indistinguishable from a genuinely empty result. On a live sales tool that is
+  // worse than a spinner: it reports "no agents" to a client when agents exist.
+  //
+  // Now a failure changes nothing on screen. The table keeps the rows it already has, we retry
+  // once quietly, and if that also fails we stop and leave the previous results in place. No
+  // error text is ever shown -- deliberately, this is client-facing -- but no wrong number is
+  // shown either. Only setLoading moves.
+  //
+  // There is also a timeout: the fetch previously had an abort signal but nothing to fire it,
+  // so a stalled request left the spinner running forever with no way out.
   const fetchData = useCallback(async () => {
     const seq = ++reqSeq.current;
     abortRef.current?.abort();
-    const ctrl = new AbortController();
-    abortRef.current = ctrl;
     scrollTopRef.current = scrollRef.current?.scrollTop ?? 0; // remember scroll for restore
     setLoading(true);
+
+    const payload = JSON.stringify({
+      mode,
+      source,
+      sortBy,
+      sortDir,
+      page,
+      pageSize,
+      // B5: single-office "brands" are just the brokerage's own name — hidden by default
+      filters:
+        mode === "brand" && showAllBrands ? { ...filters, includeSingleOfficeBrands: "true" }
+        : mode === "location" ? { ...filters, locGranularity: locGran, locKinds }
+        : filters,
+    });
+
     try {
-      const res = await fetch("/api/search/filter", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          mode,
-          source,
-          sortBy,
-          sortDir,
-          page,
-          pageSize,
-          // B5: single-office "brands" are just the brokerage's own name — hidden by default
-          filters:
-            mode === "brand" && showAllBrands ? { ...filters, includeSingleOfficeBrands: "true" }
-            : mode === "location" ? { ...filters, locGranularity: locGran, locKinds }
-            : filters,
-        }),
-        signal: ctrl.signal,
-      });
-      const json: SearchResponse = await res.json();
-      if (seq !== reqSeq.current) return; // a newer request superseded this one
-      setRows(json.data ?? []);
-      setTotal(json.totalCount ?? 0);
-      setVol(json.salesVolumeTotal ?? 0);
-    } catch (e) {
-      if ((e as Error)?.name === "AbortError") return;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        // a fresh controller per attempt: the previous one may already be aborted by the timer
+        const ctrl = new AbortController();
+        abortRef.current = ctrl;
+        const timer = setTimeout(() => ctrl.abort(), REQUEST_TIMEOUT_MS);
+        try {
+          const res = await fetch("/api/search/filter", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: payload,
+            signal: ctrl.signal,
+          });
+          if (seq !== reqSeq.current) return; // a newer request superseded this one
+          if (!res.ok) continue;              // retry once, then give up keeping current rows
+          const json: SearchResponse = await res.json();
+          if (seq !== reqSeq.current) return;
+          if (!Array.isArray(json?.data)) continue; // malformed/error body — never render it
+          setRows(json.data);
+          setTotal(json.totalCount ?? 0);
+          setVol(json.salesVolumeTotal ?? 0);
+          return;
+        } catch {
+          // superseded requests abort by design; anything else falls through to the retry
+          if (seq !== reqSeq.current) return;
+        } finally {
+          clearTimeout(timer);
+        }
+      }
     } finally {
       if (seq === reqSeq.current) setLoading(false);
     }

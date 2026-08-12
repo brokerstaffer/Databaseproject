@@ -21,12 +21,29 @@ export async function POST(req: NextRequest) {
     const offset = (Math.max(Number(page) || 1, 1) - 1) * limit;
 
     // saved-view include/exclude references are permission-gated to the caller's own/shared
-    // views before they reach the SECURITY DEFINER RPC (only pays the auth cost when used).
+    // views before they reach the SECURITY DEFINER RPC.
+    //
+    // The gate used to trigger on "savedViews" in filters, which is true on EVERY request --
+    // the key is always present in the filter object, usually as {include: [], exclude: []}.
+    // So every keystroke-debounced filter change paid a getUser() round-trip to Supabase Auth
+    // before the query even started: latency on the critical path, and one more thing that can
+    // stall. It now triggers only when a view is actually referenced.
+    //
+    // The permission check itself is unchanged: whenever ids ARE present they still go through
+    // getUser() + sanitizeSavedViews, and an unauthenticated caller still gets them stripped.
+    const sv = (filters as { savedViews?: { include?: unknown; exclude?: unknown } } | null)?.savedViews;
+    const refCount =
+      (Array.isArray(sv?.include) ? sv.include.length : 0) +
+      (Array.isArray(sv?.exclude) ? sv.exclude.length : 0);
+
     let effFilters = filters;
-    if (filters && typeof filters === "object" && "savedViews" in filters) {
+    if (refCount > 0) {
       const supabase = await createClient();
       const { data: { user } } = await supabase.auth.getUser();
       effFilters = await sanitizeSavedViews(filters, user?.id ?? null);
+    } else if (sv) {
+      // normalise the empty/malformed case without an auth round-trip
+      effFilters = { ...filters, savedViews: { include: [], exclude: [] } };
     }
 
     const admin = createAdminClient();
