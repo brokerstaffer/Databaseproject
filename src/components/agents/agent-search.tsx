@@ -70,6 +70,12 @@ function PctChange({ n }: { n: number | null | undefined }) {
   if (n == null) return <span className="text-neutral-400">N/A</span>;
   return <span className={n >= 0 ? "text-emerald-600" : "text-red-600"}>{`${n >= 0 ? "+" : ""}${n.toLocaleString()}%`}</span>;
 }
+// A18: "courted" is an internal source name that means nothing to an operator — the data it
+// labels IS MLS data, so every per-source row reads "MLS". zillow / realtor / enriched /
+// provided keep their own names; the `capitalize` class on the row title-cases those and
+// leaves an all-caps "MLS" intact.
+const sourceLabel = (s: string) => (s === "courted" ? "MLS" : s);
+
 // Metric cell with a per-source breakdown when the agent is matched across sources AND the
 // sources disagree. Identical values collapse to the single number; a source missing the
 // metric shows as N/A (matches the Courted-style reference screenshot).
@@ -87,7 +93,7 @@ function StatCell({ a, field, fmt }: { a: Agent; field: string; fmt: (v: number 
         <div className="mt-0.5 space-y-0.5">
           {breakdown.map((s) => (
             <div key={s.source} className="text-[11px] capitalize text-neutral-400">
-              {s.source}: {fmt(s[field] as number | null | undefined)}
+              {sourceLabel(s.source)}: {fmt(s[field] as number | null | undefined)}
             </div>
           ))}
         </div>
@@ -104,30 +110,12 @@ const normPhoneV = (s: string | null | undefined) => {
   const d = (s ?? "").replace(/\D/g, "");
   return d.length === 11 && d.startsWith("1") ? d.slice(1) : d;
 };
-// A18: "Courted" is an internal source name that means nothing to an operator — the data IS
-// MLS data, so label the row with the agent's MLS code(s). 87.6% of agents with an MLS belong
-// to exactly one, so this is unambiguous for almost everyone; of the rest almost all hold 2-3
-// (worst case in the data is 33), so we show up to three and count the remainder. The full
-// list stays available on hover. Agents with no MLS on file fall back to a plain "MLS".
-const MLS_LABEL_SHOWN = 3;
-function courtedLabel(a: Agent): string {
-  const codes = (a.mls ?? []).map((m) => m.code).filter((c): c is string => !!c);
-  if (codes.length === 0) return "MLS";
-  if (codes.length <= MLS_LABEL_SHOWN) return codes.join(" | ");
-  return `${codes.slice(0, MLS_LABEL_SHOWN).join(" | ")} +${codes.length - MLS_LABEL_SHOWN}`;
-}
-
 function ContactCell({ a, field }: { a: Agent; field: "email" | "phone" }) {
   const preferred = (field === "email" ? a.preferred_email : a.preferred_phone) as string | null;
   const ids = (a.source_ids ?? {}) as Record<string, { email?: string | null; phone?: string | null } | undefined>;
   const norm = field === "email" ? normEmailV : normPhoneV;
-  const allMlsCodes = (a.mls ?? []).map((m) => m.code).filter(Boolean).join(" | ");
-  const entries: { source: string; title?: string; value: string | null }[] = (["courted", "zillow", "realtor"] as const)
-    .map((s) => ({
-      source: s === "courted" ? courtedLabel(a) : (s as string),
-      title: s === "courted" ? allMlsCodes || undefined : undefined,
-      value: ids[s]?.[field] ?? null,
-    }))
+  const entries: { source: string; value: string | null }[] = (["courted", "zillow", "realtor"] as const)
+    .map((s) => ({ source: sourceLabel(s), value: ids[s]?.[field] ?? null }))
     .filter((e) => e.value);
   // enriched + agent-provided emails must stay visible next to the original — Bison
   // leads may carry either, and operators map them back by eye
@@ -141,7 +129,7 @@ function ContactCell({ a, field }: { a: Agent; field: "email" | "phone" }) {
       {breakdown.length > 0 && (
         <div className="mt-0.5 space-y-0.5">
           {breakdown.map((e) => (
-            <div key={e.source} title={e.title} className="text-[11px] capitalize text-neutral-400">
+            <div key={e.source} className="text-[11px] capitalize text-neutral-400">
               {e.source}: {e.value}
             </div>
           ))}
