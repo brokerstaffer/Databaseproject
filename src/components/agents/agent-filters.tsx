@@ -637,6 +637,11 @@ export function TitlePopover({ value, onChange }: { value: IncludeExclude; onCha
   );
 }
 
+// A view saved while no filters were applied matches the whole database. That is almost never
+// intended — it happened in production and made every search that referenced it scan 1.1M rows —
+// so anything this broad is flagged in the list rather than silently behaving like "no filter".
+const EMPTY_VIEW_THRESHOLD = 1_000_000;
+
 // ---------- Saved views as include/exclude sets (A12) ----------
 interface SavedViewOpt {
   id: string;
@@ -772,7 +777,14 @@ export function SavedViewsPopover({
             return (
               <div key={v.id} className="flex items-center gap-2 rounded-lg px-1 py-1">
                 <span className="min-w-0 flex-1 truncate text-sm text-neutral-800" title={v.name}>{v.name}</span>
-                {v.count != null && <span className="shrink-0 text-xs tabular-nums text-neutral-400">{v.count.toLocaleString()}</span>}
+                {v.count != null && (
+                  <span
+                    className={cn("shrink-0 text-xs tabular-nums", v.count > EMPTY_VIEW_THRESHOLD ? "font-medium text-amber-600" : "text-neutral-400")}
+                    title={v.count > EMPTY_VIEW_THRESHOLD ? "This view matches almost the whole database — it was probably saved with no filters applied. Re-save it with the filters you want." : undefined}
+                  >
+                    {v.count.toLocaleString()}{v.count > EMPTY_VIEW_THRESHOLD ? " ⚠" : ""}
+                  </span>
+                )}
                 <div className="flex shrink-0 gap-1">
                   <button
                     type="button"

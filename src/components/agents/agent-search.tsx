@@ -631,13 +631,10 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
               <ContactPopover value={filters.contact} onChange={(v) => setF("contact", v)} />
             </>
           )}
-          {/* A21: saved views apply to every AGENT-grained mode. Agent, MLS and Location all
-              build their WHERE with fn_agent_where, which resolves saved-view references —
-              so the filter works in all three and only the UI was gating it to Agent.
-              Office/Brand use fn_office_where, which has no saved-view support yet. */}
-          {(mode === "agent" || mode === "mls" || mode === "location") && (
-            <SavedViewsPopover value={filters.savedViews} onChange={(v) => setF("savedViews", v)} />
-          )}
+          {/* A21: saved views now apply in every mode. Agent / MLS / Location resolve them via
+              fn_agent_where; Office / Brand via fn_office_where (0082), where a view means
+              "the offices those agents work at". */}
+          <SavedViewsPopover value={filters.savedViews} onChange={(v) => setF("savedViews", v)} />
           {(mode === "office" || mode === "brand") && (
             <>
               <MlsPopover

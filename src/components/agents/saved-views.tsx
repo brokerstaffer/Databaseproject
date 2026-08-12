@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import type { Filters } from "@/types/agent-filters";
+import { activeFilterCount } from "@/types/agent-filters";
 
 interface SavedList {
   id: string;
@@ -32,11 +33,23 @@ export function SavedViews({ filters, onLoad }: { filters: Filters; onLoad: (f: 
     if (open) load();
   }, [open]);
 
+  // A view saved with nothing applied matches the whole database, so every search that later
+  // references it scans 1.1M rows. That happened in production, so saving one now takes a
+  // deliberate second click rather than going through silently.
+  const emptyFilters = activeFilterCount(filters, "agent") === 0;
+  const [confirmEmpty, setConfirmEmpty] = useState(false);
+
   async function save() {
     if (!name.trim()) {
       toast.error("Name this view");
       return;
     }
+    if (emptyFilters && !confirmEmpty) {
+      setConfirmEmpty(true);
+      toast.warning("No filters are applied — this view would match every agent. Click Save again to confirm.");
+      return;
+    }
+    setConfirmEmpty(false);
     setSaving(true);
     const res = await fetch("/api/lists", {
       method: "POST",
@@ -60,6 +73,9 @@ export function SavedViews({ filters, onLoad }: { filters: Filters; onLoad: (f: 
   }
 
   async function update(id: string) {
+    if (activeFilterCount(filters, "agent") === 0 && !window.confirm("No filters are applied. Updating this view will make it match every agent. Continue?")) {
+      return;
+    }
     const res = await fetch(`/api/lists/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
