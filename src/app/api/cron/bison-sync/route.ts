@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { timingSafeEqual } from "node:crypto";
 import { getPool } from "@/lib/db/pool";
+import { makeCampaignMatcher } from "@/lib/bison/match-campaign";
 import { createClient } from "@/lib/supabase/server";
 import { fetchClientCampaigns, fetchCampaignLeads } from "@/lib/integrations/bison";
 
@@ -79,35 +80,14 @@ async function runLeadSync(pool: any, key: string, base: string) {
       return;
     }
     try {
-    const norm = (v: string) => v.toLowerCase().replace(/\bcopy of\b/g, "").replace(/[^a-z0-9]+/g, "").replace(/^the/, "");
+    // norm/mapCampaign now come from @/lib/bison/match-campaign so this and the Export
+    // dialog cannot drift apart again — that divergence hid 47 campaigns from 13 clients.
     const clients = (await pool.query(
       "select id, client_name, bison_campaign_id from orch_clients where client_name is not null"
     )).rows as { id: string; client_name: string; bison_campaign_id: string | null }[];
-    const byDirect = new Map(clients.filter((c) => c.bison_campaign_id).map((c) => [String(c.bison_campaign_id), c]));
-    const normed = clients.map((c) => ({ c, n: norm(c.client_name) })).filter((x) => x.n.length >= 3);
+    const matchCampaign = makeCampaignMatcher(clients);
 
-    const mapCampaign = (name: string | null, bisonId: string) => {
-      if (byDirect.has(bisonId)) return byDirect.get(bisonId)!;
-      const prefix = (name ?? "").replace(/\s+/g, " ").split(" + ")[0].trim();
-      const pn = norm(prefix);
-      if (!pn) return null;
-      let best: { c: (typeof clients)[number]; len: number; score: number } | null = null;
-      let tied = false;
-      for (const { c, n } of normed) {
-        let score = 0;
-        if (pn === n) score = 3;
-        else if (n.length >= 6 && pn.startsWith(n)) score = 2;
-        else if (pn.length >= 6 && n.startsWith(pn)) score = 1;
-        if (!score) continue;
-        if (!best || score > best.score || (score === best.score && n.length > best.len)) {
-          best = { c, len: n.length, score };
-          tied = false;
-        } else if (score === best.score && n.length === best.len && c.id !== best.c.id) {
-          tied = true;
-        }
-      }
-      return best && !tied ? best.c : null;
-    };
+    const mapCampaign = (name: string | null, bisonId: string) => matchCampaign(name, bisonId);
 
     const campRows = (await pool.query(
       "select coalesce(raw->>'id', bison_campaign_id) as bison_id, name from bison_campaigns"
