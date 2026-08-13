@@ -69,6 +69,7 @@ export interface Filters {
   orchClientMode: "include" | "exclude"; // include those clients' leads, or exclude them
   contact: { email: "" | "has" | "missing"; phone: "" | "has" | "missing"; enriched: "" | "has" | "missing"; inCampaign: "" | "has" | "missing"; replied: "" | "has" | "missing"; bounced: "" | "has" | "missing" }; // has/missing per dimension ("" = any); enriched=C2, inCampaign=C5, replied=C4
   multiMls: boolean; // only agents affiliated with 2+ MLSs
+  multiCampaign: boolean; // only agents present in 2+ Bison campaigns
   mlsCount: { buckets: string[] }; // exact MLS-affiliation counts: "2".."5" exact, "6+" open (B3)
   savedViews: { include: string[]; exclude: string[] }; // saved_lists ids used as live include/exclude sets (A12)
   agentCount: RangeF; // office mode: number of agents in the office
@@ -95,6 +96,7 @@ export const DEFAULT_FILTERS: Filters = {
   orchClientMode: "include",
   contact: { email: "", phone: "", enriched: "", inCampaign: "", replied: "", bounced: "" },
   multiMls: false,
+  multiCampaign: false,
   mlsCount: { buckets: [] },
   savedViews: { include: [], exclude: [] },
   agentCount: { buckets: [], min: "", max: "" },
@@ -177,6 +179,8 @@ export function normalizeFilters(
   merged.location = { ...merged.location, values: (merged.location.values ?? []).filter(okEntry), excludeValues: (merged.location.excludeValues ?? []).filter(okEntry) };
   if (!merged.location.excludeField) merged.location = { ...merged.location, excludeField: merged.location.field };
   if (!merged.mlsCount || !Array.isArray(merged.mlsCount.buckets)) merged.mlsCount = { buckets: [] };
+  // saved views stored before the multi-campaign filter existed carry no such key
+  merged.multiCampaign = merged.multiCampaign === true;
   delete (merged as Partial<Filters> & { orchClientId?: string }).orchClientId;
   delete (merged as Partial<Filters> & { missingContact?: unknown }).missingContact;
   return merged;
@@ -204,6 +208,7 @@ export function activeFilterCount(f: Filters, mode: "agent" | "office" | "brand"
   return (
     shared +
     f.mls.include.length + f.mls.exclude.length + (f.multiMls ? 1 : 0) + f.mlsCount.buckets.length +
+    (f.multiCampaign ? 1 : 0) +
     f.savedViews.include.length + f.savedViews.exclude.length +
     ieCount(f.title) +
     ieCount(f.license) +

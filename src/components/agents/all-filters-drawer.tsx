@@ -253,7 +253,12 @@ interface MlsItem {
   updated?: string | null; // per-MLS bulk-refresh date (A8)
 }
 
-function EnrichmentSection({ value, onChange }: { value: Filters["contact"]; onChange: (v: Filters["contact"]) => void }) {
+function EnrichmentSection({ value, onChange, multiCampaign, onMultiCampaign }: {
+  value: Filters["contact"];
+  onChange: (v: Filters["contact"]) => void;
+  multiCampaign: boolean;
+  onMultiCampaign: (v: boolean) => void;
+}) {
   const row = (k: "enriched" | "inCampaign" | "replied" | "bounced", title: string, hasLbl: string, noLbl: string) => (
     <div className="mb-3 last:mb-0">
       <div className="mb-1.5 text-xs font-medium text-neutral-500">{title}</div>
@@ -265,11 +270,17 @@ function EnrichmentSection({ value, onChange }: { value: Filters["contact"]; onC
     </div>
   );
   return (
-    <Section title="Enrichment & campaigns" count={(value.enriched ? 1 : 0) + (value.inCampaign ? 1 : 0) + (value.replied ? 1 : 0) + (value.bounced ? 1 : 0)}>
+    <Section title="Enrichment & campaigns" count={(value.enriched ? 1 : 0) + (value.inCampaign ? 1 : 0) + (value.replied ? 1 : 0) + (value.bounced ? 1 : 0) + (multiCampaign ? 1 : 0)}>
       {row("enriched", "Verified / enriched", "Enriched", "Not enriched")}
       {row("inCampaign", "In a client campaign", "In campaign", "Not in campaign")}
       {row("replied", "Has replied to us", "Replied", "Never replied")}
       {row("bounced", "Emails bounced", "Bounced", "Not bounced")}
+      {/* 28,250 of the 58,184 contacted agents sit in more than one campaign, so this is a
+          plain on/off rather than a count range: "is this lead being worked twice?" */}
+      <label className="mt-3 flex cursor-pointer items-center gap-2 border-t border-neutral-100 pt-3">
+        <Checkbox checked={multiCampaign} onCheckedChange={() => onMultiCampaign(!multiCampaign)} />
+        <span className="text-xs font-medium text-neutral-600">In multiple campaigns</span>
+      </label>
     </Section>
   );
 }
@@ -530,7 +541,12 @@ export function AllFiltersDrawer({
           <RangeSection title="Average sales price" count={rangeCount(draft.avgSalePrice)} value={draft.avgSalePrice} onChange={(v) => set("avgSalePrice", v as RangeF)} buckets={[]} prefix="$" />
           <RangeSection title="Est. time in office" count={rangeCount(draft.estTimeInOffice)} value={draft.estTimeInOffice} onChange={(v) => set("estTimeInOffice", v as RangeF)} buckets={YEAR_BUCKETS} suffix="yrs" />
           <RangeSection title="Average time at office" count={rangeCount(draft.avgTimeAtOffice)} value={draft.avgTimeAtOffice} onChange={(v) => set("avgTimeAtOffice", v as RangeF)} buckets={YEAR_BUCKETS} suffix="yrs" />
-          <EnrichmentSection value={draft.contact} onChange={(v) => set("contact", v)} />
+          <EnrichmentSection
+            value={draft.contact}
+            onChange={(v) => set("contact", v)}
+            multiCampaign={draft.multiCampaign}
+            onMultiCampaign={(v) => set("multiCampaign", v)}
+          />
         </div>
         <SheetFooter className="flex-row items-center justify-between border-t border-neutral-200">
           <button

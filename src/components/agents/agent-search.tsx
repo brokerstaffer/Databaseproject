@@ -222,7 +222,10 @@ const COLUMNS: Col[] = [
   },
   { key: "inCampaign", label: "Client campaign", sortBy: "client_campaigns", defaultDir: "asc", render: (a) => (a.client_campaigns ? capped(String(a.client_campaigns)) : <span className="text-neutral-400">—</span>) },
   { key: "replied", label: "Replied", sortBy: "has_replied", render: (a) => (a.has_replied ? <span className="text-green-700">✓ replied</span> : <span className="text-neutral-400">—</span>) },
-  { key: "bounced", label: "Bounced", render: (a) => (a.has_bounced ? <span className="text-red-600">✗ bounced</span> : <span className="text-neutral-400">—</span>) },
+  { key: "bounced", label: "Bounced", sortBy: "has_bounced", render: (a) => (a.has_bounced ? <span className="text-red-600">✗ bounced</span> : <span className="text-neutral-400">—</span>) },
+  // How many distinct Bison campaigns hold this agent. Nearly half of contacted agents sit in
+  // more than one, so the count is worth showing next to the client names rather than inside them.
+  { key: "campaignCount", label: "Campaigns", sortBy: "campaign_count", align: "right", render: (a) => (a.campaign_count ? <span className={a.campaign_count > 1 ? "font-medium text-amber-700" : undefined}>{a.campaign_count}</span> : <span className="text-neutral-400">—</span>) },
 ];
 
 const DEFAULT_COL_ORDER = COLUMNS.map((c) => c.key);

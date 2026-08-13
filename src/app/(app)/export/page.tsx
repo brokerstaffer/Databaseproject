@@ -60,6 +60,7 @@ function summarizeFilters(bf: BatchFilters | null): string {
   if (f.contact?.email) parts.push(f.contact.email === "has" ? "Has email" : "No email");
   if (f.contact?.phone) parts.push(f.contact.phone === "has" ? "Has phone" : "No phone");
   if (f.multiMls) parts.push("Multi-MLS only");
+  if (f.multiCampaign) parts.push("In multiple campaigns");
   const sv = f.savedViews as { include?: string[]; exclude?: string[] } | undefined;
   if (sv?.include?.length) parts.push(`${sv.include.length} view${sv.include.length > 1 ? "s" : ""} incl`);
   if (sv?.exclude?.length) parts.push(`${sv.exclude.length} view${sv.exclude.length > 1 ? "s" : ""} excl`);
