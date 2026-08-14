@@ -5,20 +5,27 @@ import { logAudit } from "@/lib/api/log-audit";
 
 export const maxDuration = 300;
 
-// Correct agent phone numbers from an outside system. Token-authed like /api/ingest/agents,
-// NOT session-authed, so a script can call it.
+// Add a phone number or email address for an agent, from an outside system. Token-authed like
+// /api/ingest/agents, NOT session-authed, so a script can call it.
 //
-// The ingest route cannot do this: preferred_phone is a fill-blanks-only column there, so for
-// the 1,131,487 agents carrying 'courted' in sources an incoming number is silently discarded
-// unless the field is empty. This route overwrites deliberately, and records what it replaced.
+// IT NEVER OVERWRITES COURTED DATA. preferred_phone / preferred_email hold the MLS values and are
+// left exactly as they are. The supplied value is stored ALONGSIDE them, in
+// source_ids.agent_provided — the same layer the agent profile dialog writes, the table renders
+// as a "provided" row, and the top-bar search looks inside.
 //
-// Writable fields: phone and email. EMAIL REQUIRES A PRECISE MATCH — agent_id or
-// license_number, never email or phone. Since every match is updated, rewriting email while
-// matching BY email is the one combination that can destroy data at scale: noemail@har.com maps
-// to 280 agents, so one such call would give all 280 the same address. Matching by licence keeps
-// the blast radius at the 586 known-bad licences, which are visible placeholders (000000). A
-// spec that breaks this rule is refused whole — the phone in it is not applied either — and
-// comes back as status "email_needs_precise_key".
+// That layer is not a dead end: the enrich-worker prefers it when building a Bison lead, ahead of
+// Courted, Zillow and Realtor, whatever Data priority the operator picked —
+//   PRIORITY_ORDERS.courted = ["agent_provided", "courted", "zillow", "realtor"]
+// and the send resolves the email the same way. So a correction is used, and the original is
+// still there beside it.
+//
+// Fields: phone and email. They MERGE — setting a phone leaves a previously provided email in
+// place. Repeat calls replace the previously PROVIDED value, never the Courted one.
+//
+// EMAIL REQUIRES A PRECISE MATCH — agent_id or license_number, never email or phone. Nothing is
+// destroyed now, but a provided address WINS at send time, so a careless bulk write would still
+// mail the wrong people: noemail@har.com matches 280 agents. A spec that breaks this rule is
+// refused whole — the phone in it is not applied either — and returns "email_needs_precise_key".
 //
 // Body — a single update, or a batch:
 //   { "match": { "license_number": "01234567" }, "phone": "+1 305 555 0142" }
@@ -28,14 +35,17 @@ export const maxDuration = 300;
 // match accepts agent_id | license_number | email | phone, tried in that order (the same
 // waterfall the scraper's own matcher uses). Callers rarely hold our UUIDs, so licence and email
 // are the realistic keys: 79.8% of agents carry a licence, 91.1% an email, 92.9% at least one.
+// Matching by email or phone looks at the provided value as well as the original, so an agent
+// stays findable by whichever one the caller knows.
 //
 // EVERY MATCH IS UPDATED. Identifiers are not unique in this data — noemail@har.com maps to 280
 // agents and the switchboard 18885195113 to 652 — so `matched` is returned on every result and a
 // caller expecting one row should check it. Pass max_matches to have an update refused instead
 // of applied above a given count.
 //
-// Reversible: the response carries a batch_id; POST it to /api/agents/contact/undo to restore
-// every value that batch changed.
+// Reversible: the response carries a batch_id; POST it to /api/agents/contact/undo. Undo puts the
+// previously provided value back, or removes the provided entry entirely if there was none —
+// Courted's values are never involved either way.
 async function authed(req: NextRequest): Promise<boolean | string> {
   const token =
     req.headers.get("x-ingest-token") ?? req.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ?? "";
