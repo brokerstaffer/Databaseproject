@@ -153,10 +153,20 @@ async function runLeadSync(pool: any, key: string, base: string) {
           // incremental pass only ADDS flags. Bounces wiped by the replace are then never
           // restored. Carrying the flags keeps the mirror correct at every instant; the
           // end-of-run sweeps still reconcile in both directions, so nothing is pinned stale.
-          const prev = await dbc.query(
-            "select email, replied, bounced from bison_client_leads where campaign_id = $1 and (replied or bounced)",
-            [cm.bison_id]
-          );
+          // Looked up by EMAIL across the whole table, not just this campaign, because that is
+          // what both sweeps mean by the flags: each matches `email = any(...)` with no campaign
+          // scoping, so a reply or a bounce belongs to the address, not to one campaign's row.
+          // 32,182 emails sit in more than one campaign here, and leads get moved between them,
+          // so a per-campaign lookup would drop the flag every time that happened.
+          const prev = emails.length
+            ? await dbc.query(
+                `select email, bool_or(replied) replied, bool_or(bounced) bounced
+                   from bison_client_leads
+                  where email = any($1::text[]) and (replied or bounced)
+                  group by email`,
+                [emails]
+              )
+            : { rows: [] };
           const prevFlags = new Map<string, { replied: boolean; bounced: boolean }>(
             (prev.rows as { email: string; replied: boolean; bounced: boolean }[]).map((r) => [
               r.email,
