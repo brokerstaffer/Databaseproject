@@ -264,7 +264,15 @@ async function runLeadSync(pool: any, key: string, base: string) {
         }
         const next = j?.meta?.next_cursor ?? j?.next_cursor ?? j?.links?.next;
         if (!next || data.length === 0 || (cutoff && allOld)) break;
-        url = String(next).startsWith("http") ? String(next) : `${root}/replies?folder=bounced&pagination_type=cursor&per_page=100&cursor=${encodeURIComponent(String(next))}`;
+        // `links.next` comes back WITHOUT folder=bounced (verified against the live API), so
+        // following it verbatim would page through every folder — and the full-reconcile branch
+        // below would then flag replied leads as bounced. meta.next_cursor is a bare token today
+        // and takes the safe path, but pull the cursor out of the URL rather than trusting that.
+        const cursor = String(next).startsWith("http")
+          ? new URL(String(next)).searchParams.get("cursor") ?? ""
+          : String(next);
+        if (!cursor) break;
+        url = `${root}/replies?folder=bounced&pagination_type=cursor&per_page=100&cursor=${encodeURIComponent(cursor)}`;
       }
       bouncedTotal = bouncedEmails.length;
       if (cutoff) {
@@ -293,12 +301,17 @@ async function runLeadSync(pool: any, key: string, base: string) {
     await pool.query(
       `insert into audit_logs (action, performed_by, details) values ('bison_lead_sync', 'cron',
        $1)`,
-      [`synced ${campaignsSynced} campaigns, ${leadsTotal} leads (${matchedTotal} matched)` +
+      [`synced ${campaignsSynced} campaigns, ${leadsTotal} leads (${matchedTotal} matched), ` +
+       `${repliedTotal} replied / ${bouncedTotal} bounced seen` +
        (errors.length ? ` — ${errors.length} FAILED: ${errors.map((e) => e.campaign).slice(0, 5).join(", ")}` : "") +
+       // warnings used to be computed and dropped, which is why a failing sweep left no trace
+       // anywhere: "replied sweep failed" and "bounce sweep failed" both land here, and both mean
+       // the flags did not get reconciled on this run.
+       (warnings.length ? ` — WARN: ${warnings.slice(0, 5).join("; ")}` : "") +
        (unmappedClientLike.length ? ` — unmapped: ${unmappedClientLike.slice(0, 5).join(", ")}` : "")]
     ).catch((e: unknown) => console.error("bison_lead_sync audit write failed:", e instanceof Error ? e.message : e));
 
-    void summary; // recorded via the audit write above
+    void summary; // the fields above are the ones worth persisting; the rest is for the HTTP body
     } finally {
       await lockConn.query("select pg_advisory_unlock(hashtext('bison-lead-sync'))").catch(() => {});
       lockConn.release();
