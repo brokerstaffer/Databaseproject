@@ -249,50 +249,87 @@ async function runLeadSync(pool: any, key: string, base: string) {
       warnings.push(`replied sweep failed: ${e instanceof Error ? e.message : "error"}`);
     }
 
-    // C1: bounced sweep — CURSOR pagination (the replies endpoint caps pages at 15 items
-    // and offset pagination degrades to minutes-per-page at depth; cursors stay ~250ms).
-    // Incremental: once flags exist, stop as soon as a page's items are all older than the
-    // last completed sync minus a day — routine sweeps read only the new bounces.
+    // C1: bounced sweep — reads LEADS Bison marks bounced, not bounce MESSAGES.
+    //
+    // This used to page /replies?folder=bounced and take `lead.email ?? primary_to_email_address`.
+    // A bounce there is a Delivery Status Notification FROM mailer-daemon TO our own sending
+    // mailbox, and `lead` is null on most of them, so the fallback collected OUR SENDER ADDRESSES.
+    // Measured over 300 messages: 10 real lead emails, 170 distinct sender addresses. Those
+    // addresses match no lead, so the sweep flagged almost nothing -- and on the full-reconcile
+    // path it would have CLEARED every genuine flag, since real bounced leads were absent from
+    // the list it built. The folder also carries "(Delay)" notices, which are not bounces.
+    //
+    // filters[verification_statuses][]=bounced returns the leads themselves, which is the thing
+    // we actually want: 4,072 leads today vs 21,705 message rows. Every one of the 10 real lead
+    // emails found above is in that set, and all 118 flags that survived in our mirror were
+    // confirmed by it, with 0 contradictions.
+    //
+    // Offset pagination here has no server-side cursor state (pages verified distinct,
+    // repeatable, and concurrent-consistent), so pages are fetched CONCURRENTLY: 272 pages at 15
+    // rows each is ~2 minutes at 8 at a time, against ~16 sequential.
     let bouncedTotal = 0;
     try {
-      const hasFlags = ((await pool.query("select 1 from bison_client_leads where bounced limit 1")).rowCount ?? 0) > 0;
-      const lastSync = (await pool.query("select max(created_at) t from audit_logs where action='bison_lead_sync'")).rows[0]?.t;
-      const cutoff = hasFlags && lastSync ? new Date(new Date(lastSync).getTime() - 24 * 3600 * 1000) : null;
-      const bouncedEmails: string[] = [];
       const root = base.replace(/\/+$/, "");
-      let url = `${root}/replies?folder=bounced&pagination_type=cursor&per_page=100`;
-      for (let i = 1; i <= 2000; i++) {
-        const res = await fetch(url, { headers: { Authorization: `Bearer ${key}`, Accept: "application/json" }, signal: AbortSignal.timeout(30000) });
-        if (!res.ok) throw new Error(`bounce sweep ${res.status}`);
-        const j = await res.json();
-        const data: { lead?: { email?: string } | null; primary_to_email_address?: string | null; created_at?: string }[] = Array.isArray(j?.data) ? j.data : [];
-        let allOld = data.length > 0;
-        for (const b of data) {
-          const e = String(b.lead?.email ?? b.primary_to_email_address ?? "").trim().toLowerCase();
-          if (e.includes("@")) bouncedEmails.push(e);
-          if (!cutoff || !b.created_at || new Date(b.created_at) >= cutoff) allOld = false;
+      // Retries because ONE failed page aborts the whole sweep (a partial list must not reach the
+      // reconcile), and over 272 pages a single transient error would otherwise be routine.
+      const bouncedPage = async (n: number, attempt = 1): Promise<{ rows: { email?: string }[]; lastPage?: number }> => {
+        const url = `${root}/leads?filters%5Bverification_statuses%5D%5B%5D=bounced&pagination_type=length_aware&per_page=100&page=${n}`;
+        try {
+          const res = await fetch(url, { headers: { Authorization: `Bearer ${key}`, Accept: "application/json" }, signal: AbortSignal.timeout(60000) });
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const j = await res.json();
+          // an error-in-200 arrives as an OBJECT under data; it must not read as "no bounces"
+          if (!Array.isArray(j?.data)) throw new Error(JSON.stringify(j?.data).slice(0, 120));
+          return { rows: j.data, lastPage: j?.meta?.last_page as number | undefined };
+        } catch (e) {
+          if (attempt < 4) {
+            await new Promise((r) => setTimeout(r, 1000 * attempt));
+            return bouncedPage(n, attempt + 1);
+          }
+          throw new Error(`bounce sweep page ${n} after 4 attempts: ${e instanceof Error ? e.message : String(e)}`);
         }
-        const next = j?.meta?.next_cursor ?? j?.next_cursor ?? j?.links?.next;
-        if (!next || data.length === 0 || (cutoff && allOld)) break;
-        // `links.next` comes back WITHOUT folder=bounced (verified against the live API), so
-        // following it verbatim would page through every folder — and the full-reconcile branch
-        // below would then flag replied leads as bounced. meta.next_cursor is a bare token today
-        // and takes the safe path, but pull the cursor out of the URL rather than trusting that.
-        const cursor = String(next).startsWith("http")
-          ? new URL(String(next)).searchParams.get("cursor") ?? ""
-          : String(next);
-        if (!cursor) break;
-        url = `${root}/replies?folder=bounced&pagination_type=cursor&per_page=100&cursor=${encodeURIComponent(cursor)}`;
-      }
+      };
+
+      const first = await bouncedPage(1);
+      const lastPage = first.lastPage ?? 1;
+      if (lastPage > 5000) throw new Error(`bounce sweep: ${lastPage} pages, refusing`);
+      const set = new Set<string>();
+      const collect = (rows: { email?: string }[]) => {
+        for (const l of rows) {
+          const e = String(l.email ?? "").trim().toLowerCase();
+          if (e.includes("@")) set.add(e);
+        }
+      };
+      collect(first.rows);
+
+      const queue: number[] = [];
+      for (let n = 2; n <= lastPage; n++) queue.push(n);
+      const failures: string[] = [];
+      await Promise.all(
+        Array.from({ length: 8 }, async () => {
+          while (queue.length) {
+            const n = queue.shift()!;
+            try {
+              collect((await bouncedPage(n)).rows);
+            } catch (e) {
+              failures.push(e instanceof Error ? e.message : String(e));
+            }
+          }
+        })
+      );
+      // a partial list must never reach the reconcile below — absence means "not bounced" there
+      if (failures.length) throw new Error(`${failures.length} page(s) failed, e.g. ${failures[0]}`);
+
+      const bouncedEmails = [...set];
       bouncedTotal = bouncedEmails.length;
-      if (cutoff) {
-        // incremental pass: only ADD flags — clearing requires the full picture
-        if (bouncedEmails.length) {
-          await pool.query("update bison_client_leads set bounced = true where not bounced and email = any($1::text[])", [bouncedEmails]);
-        }
-      } else {
-        await pool.query("update bison_client_leads set bounced = (email = any($1::text[])) where bounced is distinct from (email = any($1::text[]))", [bouncedEmails]);
-      }
+      // Now that the list is the authoritative set of bounced leads rather than a sample of
+      // notification recipients, a two-way reconcile is correct: it adds new bounces and clears
+      // any lead Bison no longer considers bounced. The old incremental branch existed only
+      // because the list could not be trusted to be complete.
+      await pool.query(
+        "update bison_client_leads set bounced = (email = any($1::text[])) where bounced is distinct from (email = any($1::text[]))",
+        [bouncedEmails]
+      );
     } catch (e) {
       warnings.push(`bounce sweep failed: ${e instanceof Error ? e.message : "error"}`);
     }
