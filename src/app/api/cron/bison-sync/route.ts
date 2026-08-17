@@ -140,16 +140,45 @@ async function runLeadSync(pool: any, key: string, base: string) {
         const dbc = await pool.connect();
         try {
           await dbc.query("begin");
+          // Carry `replied`/`bounced` across the replace below.
+          //
+          // The replace re-creates every row for this campaign and both flags default to false,
+          // but the sweeps that set them run only AFTER the whole campaign loop. Without this
+          // carry-over the flags read false for the 10-15 minutes the mirror takes to rebuild, so
+          // the Replied filter, column and sort silently under-report for the entire window --
+          // measured live at 2,731 replied rows draining to 501 mid-sync before recovering.
+          //
+          // Bounced is worse than replied: its sweep goes incremental whenever ANY bounced row
+          // survives the loop (a campaign that errored or returned empty keeps its rows), and an
+          // incremental pass only ADDS flags. Bounces wiped by the replace are then never
+          // restored. Carrying the flags keeps the mirror correct at every instant; the
+          // end-of-run sweeps still reconcile in both directions, so nothing is pinned stale.
+          const prev = await dbc.query(
+            "select email, replied, bounced from bison_client_leads where campaign_id = $1 and (replied or bounced)",
+            [cm.bison_id]
+          );
+          const prevFlags = new Map<string, { replied: boolean; bounced: boolean }>(
+            (prev.rows as { email: string; replied: boolean; bounced: boolean }[]).map((r) => [
+              r.email,
+              { replied: r.replied, bounced: r.bounced },
+            ])
+          );
           // a campaign belongs to exactly one client — a rename/re-point moves its rows
           await dbc.query("delete from bison_client_leads where campaign_id = $1", [cm.bison_id]);
           if (leads.length) {
             const seen = new Set<string>();
             const rows = leads.filter((l) => (seen.has(l.email) ? false : (seen.add(l.email), true)))
-              .map((l) => ({ email: l.email, bison_lead_id: l.bison_lead_id, agent_id: matched.get(l.email) ?? null }));
+              .map((l) => ({
+                email: l.email,
+                bison_lead_id: l.bison_lead_id,
+                agent_id: matched.get(l.email) ?? null,
+                replied: prevFlags.get(l.email)?.replied ?? false,
+                bounced: prevFlags.get(l.email)?.bounced ?? false,
+              }));
             await dbc.query(
-              `insert into bison_client_leads (client_id, campaign_id, campaign_name, bison_lead_id, email, agent_id)
-               select $1, $2, $3, x.bison_lead_id, x.email, x.agent_id
-                 from jsonb_to_recordset($4::jsonb) as x(bison_lead_id text, email text, agent_id uuid)`,
+              `insert into bison_client_leads (client_id, campaign_id, campaign_name, bison_lead_id, email, agent_id, replied, bounced)
+               select $1, $2, $3, x.bison_lead_id, x.email, x.agent_id, x.replied, x.bounced
+                 from jsonb_to_recordset($4::jsonb) as x(bison_lead_id text, email text, agent_id uuid, replied boolean, bounced boolean)`,
               [client.id, cm.bison_id, cm.name, JSON.stringify(rows)]
             );
             leadsTotal += rows.length;
@@ -175,11 +204,19 @@ async function runLeadSync(pool: any, key: string, base: string) {
     );
 
     // C4: which leads have EVER replied — one paginated sweep of the workspace-global
-    // replied filter (~28 pages for ~2.8k leads), then flag our mirrored rows.
+    // replied filter, then flag our mirrored rows.
+    //
+    // NOTE ON PAGE SIZE: this endpoint IGNORES per_page and serves 15 rows a page regardless, so
+    // the old 500-page cap was 7,500 leads, not 50,000. At 3,755 replied leads today (251 pages)
+    // that headroom was under 2x. Exceeding the cap did NOT throw -- the loop just ended -- and
+    // the update below then CLEARED replied for every lead past the cut. Raised to the bounce
+    // sweep's 2,000 and made incomplete pagination an error, because a truncated list must never
+    // reach an UPDATE that treats absence as "no longer replied".
     let repliedTotal = 0;
     try {
       const repliedEmails: string[] = [];
-      for (let page = 1; page <= 500; page++) {
+      let complete = false;
+      for (let page = 1; page <= 2000; page++) {
         const res = await fetch(
           `${base.replace(/\/+$/, "")}/leads?filters[lead_campaign_status]=replied&pagination_type=length_aware&per_page=100&page=${page}`,
           { headers: { Authorization: `Bearer ${key}`, Accept: "application/json" }, signal: AbortSignal.timeout(30000) }
@@ -192,9 +229,10 @@ async function runLeadSync(pool: any, key: string, base: string) {
           if (e.includes("@")) repliedEmails.push(e);
         }
         const lastPage = j?.meta?.last_page as number | undefined;
-        if (data.length === 0 || (lastPage && page >= lastPage)) break;
+        if (data.length === 0 || (lastPage && page >= lastPage)) { complete = true; break; }
         if (!lastPage && data.length >= 100) throw new Error("replied sweep: pagination shape unknown");
       }
+      if (!complete) throw new Error("replied sweep: page cap hit — refusing to clear flags from a truncated list");
       repliedTotal = repliedEmails.length;
       await pool.query("update bison_client_leads set replied = (email = any($1::text[])) where replied is distinct from (email = any($1::text[]))", [repliedEmails]);
     } catch (e) {
