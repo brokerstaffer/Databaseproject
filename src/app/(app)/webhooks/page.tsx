@@ -122,8 +122,11 @@ export default function ClientsPage() {
               <th className="px-4 py-3">Location</th>
               <th className="px-4 py-3 text-right">Leads built</th>
               <th className="px-4 py-3 text-right">In Bison</th>
-              <th className="px-4 py-3 text-right">Replied</th>
-              <th className="px-4 py-3 text-right">Bounced</th>
+              {/* These two count EmailBison leads only (see /api/orch/clients). The agent
+                  table's Replied column now covers Instantly as well, so label these
+                  explicitly rather than let the two silently disagree. */}
+              <th className="px-4 py-3 text-right">Replied (Bison)</th>
+              <th className="px-4 py-3 text-right">Bounced (Bison)</th>
               <th className="px-4 py-3">In review</th>
               <th className="px-4 py-3">Exported</th>
               <th className="px-4 py-3 text-right">Campaign ID</th>
