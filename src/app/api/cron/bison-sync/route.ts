@@ -222,17 +222,37 @@ async function runLeadSync(pool: any, key: string, base: string) {
     // the update below then CLEARED replied for every lead past the cut. Raised to the bounce
     // sweep's 2,000 and made incomplete pagination an error, because a truncated list must never
     // reach an UPDATE that treats absence as "no longer replied".
+    //
+    // RETRIES, because one bad page aborts the whole sweep. 15 rows a page means ~251 sequential
+    // requests, and on 2026-08-18 a single HTTP 500 partway through killed the run: the audit row
+    // read "0 replied ... WARN: replied sweep failed: replied sweep 500" while the endpoint
+    // answered 200 on every manual attempt minutes later. Nothing was lost -- the throw is what
+    // stops a partial list reaching the UPDATE below -- but Bison's replies simply did not refresh
+    // for that cycle. Four attempts with a rising delay turns a blip into a non-event, and a real
+    // outage still fails loudly rather than clearing flags.
     let repliedTotal = 0;
     try {
       const repliedEmails: string[] = [];
       let complete = false;
+      type RepliedPage = { data?: { email?: string }[]; meta?: { last_page?: number } };
+      const repliedPage = async (page: number, attempt = 1): Promise<RepliedPage> => {
+        try {
+          const res = await fetch(
+            `${base.replace(/\/+$/, "")}/leads?filters[lead_campaign_status]=replied&pagination_type=length_aware&per_page=100&page=${page}`,
+            { headers: { Authorization: `Bearer ${key}`, Accept: "application/json" }, signal: AbortSignal.timeout(30000) }
+          );
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          return await res.json();
+        } catch (e) {
+          if (attempt < 4) {
+            await new Promise((r) => setTimeout(r, 1000 * attempt));
+            return repliedPage(page, attempt + 1);
+          }
+          throw new Error(`replied sweep page ${page} after 4 attempts: ${e instanceof Error ? e.message : String(e)}`);
+        }
+      };
       for (let page = 1; page <= 2000; page++) {
-        const res = await fetch(
-          `${base.replace(/\/+$/, "")}/leads?filters[lead_campaign_status]=replied&pagination_type=length_aware&per_page=100&page=${page}`,
-          { headers: { Authorization: `Bearer ${key}`, Accept: "application/json" }, signal: AbortSignal.timeout(30000) }
-        );
-        if (!res.ok) throw new Error(`replied sweep ${res.status}`);
-        const j = await res.json();
+        const j = await repliedPage(page);
         const data: { email?: string }[] = Array.isArray(j?.data) ? j.data : [];
         for (const l of data) {
           const e = String(l.email ?? "").trim().toLowerCase();
