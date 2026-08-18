@@ -19,17 +19,26 @@ export async function GET(req: NextRequest) {
   const pool = getPool();
   const [{ rows }, sync, bisonTotal] = await Promise.all([
     pool.query(
-      // lead_count = orchestrator/scraper list; bison_leads = what's actually in the sequencer
+      // lead_count = orchestrator/scraper list; bison_leads = what's actually in the sequencers
       // (all campaign membership, incl. leads not in our DB); bison_matched = of those, rows we
-      // can show in the grid. Once bison_leads > 0 the client filter uses the Bison set (D1).
+      // can show in the grid. Once bison_leads > 0 the client filter uses that set (D1).
+      //
+      // These now count BOTH sequencers via v_agent_campaigns, which is why the page's column
+      // headers lost their "(Bison)" qualifier: they were labelled that way only because they
+      // disagreed with the agent table, and since 0109 they no longer do. The column ALIASES keep
+      // the bison_ prefix so the response shape and every consumer stay unchanged.
+      //
+      // Counted on email, so a lead in several of a client's campaigns still counts once. Instantly
+      // rows with a null client_id belong to no client and correctly fall out of these per-client
+      // counts, while still being visible in the agent table.
       `select c.id, c.client_name, c.status, c.mls, c.location, c.bison_campaign_id,
               c.leads_inreview, c.bison_leads_exported, c.created_at,
               (c.portal_url is not null and c.portal_token is not null) as has_portal,
               count(distinct l.agent_id)::int as lead_count,
-              (select count(distinct b.email) from bison_client_leads b where b.client_id = c.id)::int as bison_leads,
-              (select count(distinct b.agent_id) from bison_client_leads b where b.client_id = c.id and b.agent_id is not null)::int as bison_matched,
-              (select count(distinct b.email) from bison_client_leads b where b.client_id = c.id and b.replied)::int as bison_replied,
-              (select count(distinct b.email) from bison_client_leads b where b.client_id = c.id and b.bounced)::int as bison_bounced
+              (select count(distinct b.email) from v_client_campaign_leads b where b.client_id = c.id)::int as bison_leads,
+              (select count(distinct b.agent_id) from v_client_campaign_leads b where b.client_id = c.id and b.agent_id is not null)::int as bison_matched,
+              (select count(distinct b.email) from v_client_campaign_leads b where b.client_id = c.id and b.replied)::int as bison_replied,
+              (select count(distinct b.email) from v_client_campaign_leads b where b.client_id = c.id and b.bounced)::int as bison_bounced
          from orch_clients c
          left join orch_client_leads l on l.client_id = c.id
         ${inReviewOnly ? "where c.leads_inreview = true" : ""}
@@ -37,7 +46,7 @@ export async function GET(req: NextRequest) {
         order by c.client_name nulls last`
     ),
     pool.query(`select max(fetched_at) as at from bison_campaigns`),
-    pool.query(`select count(distinct (client_id, email))::int as total, count(distinct agent_id)::int as matched, max(synced_at) as at from bison_client_leads`),
+    pool.query(`select count(distinct (client_id, email))::int as total, count(distinct agent_id)::int as matched, max(synced_at) as at from v_client_campaign_leads`),
   ]);
   return NextResponse.json({
     clients: rows,

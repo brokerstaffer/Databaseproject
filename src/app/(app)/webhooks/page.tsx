@@ -54,19 +54,41 @@ export default function ClientsPage() {
     load();
   }, []);
 
+  // Triggers BOTH sequencers. This used to post to bison-sync alone, so there was no way to
+  // refresh Instantly from the app at all — it only ever moved on the 6-hourly cron.
+  //
+  // They are fired independently on purpose: an EmailBison outage must not stop Instantly
+  // refreshing, and vice versa. Both return 202 and do the real work in the background, so the
+  // toast reports what was STARTED; the outcome lands in audit_logs.
   async function syncCampaigns() {
     setSyncing(true);
-    const res = await fetch("/api/cron/bison-sync", { method: "POST" });
+    const [bison, instantly] = await Promise.allSettled([
+      fetch("/api/cron/bison-sync", { method: "POST" }).then(async (r) => ({ ok: r.ok, j: await r.json().catch(() => ({})) })),
+      fetch("/api/cron/instantly-sync", { method: "POST" }).then(async (r) => ({ ok: r.ok, j: await r.json().catch(() => ({})) })),
+    ]);
     setSyncing(false);
-    const j = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      toast.error(j.error ?? "Sync failed");
-      return;
+
+    const failed: string[] = [];
+    const bisonOk = bison.status === "fulfilled" && bison.value.ok && !bison.value.j?.error;
+    const instOk = instantly.status === "fulfilled" && instantly.value.ok && !instantly.value.j?.error;
+    if (!bisonOk) {
+      failed.push(
+        `EmailBison — ${bison.status === "rejected" ? "request failed" : bison.value.j?.error ?? "sync failed"}`
+      );
     }
-    if (j.error) {
-      toast.error(`Sync failed — ${j.error}`, { duration: 9000 });
+    if (!instOk) {
+      failed.push(
+        `Instantly — ${instantly.status === "rejected" ? "request failed" : instantly.value.j?.error ?? "sync failed"}`
+      );
+    }
+
+    if (failed.length === 2) {
+      toast.error(`Both syncs failed. ${failed.join(" · ")}`, { duration: 9000 });
+    } else if (failed.length === 1) {
+      toast.warning(`Started one of two. ${failed[0]}`, { duration: 9000 });
     } else {
-      toast.success(`Synced ${j.campaigns ?? 0} campaigns from the workspace`);
+      const campaigns = bison.status === "fulfilled" ? bison.value.j?.campaigns ?? 0 : 0;
+      toast.success(`Syncing ${campaigns} EmailBison campaigns and the Instantly workspace — this runs in the background.`);
     }
     load();
   }
@@ -121,12 +143,12 @@ export default function ClientsPage() {
               <th className="px-4 py-3">MLS</th>
               <th className="px-4 py-3">Location</th>
               <th className="px-4 py-3 text-right">Leads built</th>
-              <th className="px-4 py-3 text-right">In Bison</th>
-              {/* These two count EmailBison leads only (see /api/orch/clients). The agent
-                  table's Replied column now covers Instantly as well, so label these
-                  explicitly rather than let the two silently disagree. */}
-              <th className="px-4 py-3 text-right">Replied (Bison)</th>
-              <th className="px-4 py-3 text-right">Bounced (Bison)</th>
+              <th className="px-4 py-3 text-right">In sequencers</th>
+              {/* These counted EmailBison only, so they were labelled "(Bison)" to stop them
+                  silently disagreeing with the agent table. Since 0111 they read
+                  v_client_campaign_leads and cover both sequencers, so the qualifier is gone. */}
+              <th className="px-4 py-3 text-right">Replied</th>
+              <th className="px-4 py-3 text-right">Bounced</th>
               <th className="px-4 py-3">In review</th>
               <th className="px-4 py-3">Exported</th>
               <th className="px-4 py-3 text-right">Campaign ID</th>

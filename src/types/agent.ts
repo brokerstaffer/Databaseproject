@@ -59,10 +59,14 @@ export interface Agent {
   enriched_email?: string | null;
   enriched_email_status?: string | null;
   enriched_at?: string | null; // when the enrichment pipeline last processed this agent (C2)
-  client_campaigns?: string | null; // client names whose Bison campaigns hold this agent (C5)
+  client_campaigns?: string | null; // client names whose campaigns hold this agent, either sequencer (C5)
   has_replied?: boolean;
-  has_bounced?: boolean; // C1: a campaign email to this lead bounced
-  campaign_count?: number | null; // how many distinct Bison campaigns hold this agent
+  has_bounced?: boolean; // C1: a campaign email to this lead bounced, either sequencer
+  campaign_count?: number | null; // distinct campaigns holding this agent, across both sequencers
+  // WHERE a reply came from — "EmailBison", "Instantly", or both. Populated from the campaigns the
+  // agent actually replied in, so both are null exactly when has_replied is false.
+  reply_providers?: string | null;
+  reply_campaigns?: string | null;
   [key: string]: unknown;
 }
 

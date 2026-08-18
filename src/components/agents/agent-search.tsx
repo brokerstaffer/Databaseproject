@@ -221,14 +221,56 @@ const COLUMNS: Col[] = [
       ),
   },
   { key: "inCampaign", label: "Client campaign", sortBy: "client_campaigns", defaultDir: "asc", render: (a) => (a.client_campaigns ? capped(String(a.client_campaigns)) : <span className="text-neutral-400">—</span>) },
+  // WHERE the reply came from, immediately left of Replied. Until now a replied agent showed a bare
+  // tick: no sequencer, no campaign. An agent who only replied in Instantly rendered "✓ replied"
+  // beside an em dash in Client campaign, with nothing explaining why. Both tables have carried
+  // campaign_name all along; v_agent_reply_sources (0108) is what finally reads it.
+  //
+  // Sourced from the campaigns the agent REPLIED in, not everything they are a member of, so these
+  // are empty exactly when Replied shows an em dash.
+  { key: "replySource", label: "Reply source", sortBy: "reply_providers", defaultDir: "asc", render: (a) =>
+      a.reply_providers
+        ? <span className={String(a.reply_providers).includes(",") ? "font-medium text-violet-700" : "text-neutral-700"}>{String(a.reply_providers)}</span>
+        : <span className="text-neutral-400">—</span> },
+  { key: "replyCampaign", label: "Reply campaign", sortBy: "reply_campaigns", defaultDir: "asc", render: (a) => (a.reply_campaigns ? capped(String(a.reply_campaigns)) : <span className="text-neutral-400">—</span>) },
   { key: "replied", label: "Replied", sortBy: "has_replied", render: (a) => (a.has_replied ? <span className="text-green-700">✓ replied</span> : <span className="text-neutral-400">—</span>) },
   { key: "bounced", label: "Bounced", sortBy: "has_bounced", render: (a) => (a.has_bounced ? <span className="text-red-600">✗ bounced</span> : <span className="text-neutral-400">—</span>) },
-  // How many distinct Bison campaigns hold this agent. Nearly half of contacted agents sit in
-  // more than one, so the count is worth showing next to the client names rather than inside them.
+  // How many distinct campaigns hold this agent, across BOTH sequencers since 0109. Nearly half of
+  // contacted agents sit in more than one, so the count is worth showing next to the client names
+  // rather than inside them.
   { key: "campaignCount", label: "Campaigns", sortBy: "campaign_count", align: "right", render: (a) => (a.campaign_count ? <span className={a.campaign_count > 1 ? "font-medium text-amber-700" : undefined}>{a.campaign_count}</span> : <span className="text-neutral-400">—</span>) },
 ];
 
 const DEFAULT_COL_ORDER = COLUMNS.map((c) => c.key);
+
+/**
+ * Fold a saved column order together with the current default one.
+ *
+ * The saved order wins for everything it knows about — a user's arrangement is theirs. Columns
+ * added since they last saved are placed where the DEFAULT order puts them, right after whichever
+ * of their default predecessors the user still has, rather than appended to the end.
+ *
+ * Appending is what this used to do, and it is wrong for a column whose position is the point:
+ * "Reply source" and "Reply campaign" are meant to sit immediately left of Replied, and every
+ * existing user has a saved order, so all of them would have found the two new columns marooned
+ * past the last money column instead.
+ */
+function mergeColOrder(saved: string[]): string[] {
+  if (!saved.length) return DEFAULT_COL_ORDER;
+  const out = saved.filter((k) => DEFAULT_COL_ORDER.includes(k));
+  for (const key of DEFAULT_COL_ORDER) {
+    if (out.includes(key)) continue;
+    const defIdx = DEFAULT_COL_ORDER.indexOf(key);
+    // nearest earlier default-order column the user still has; -1 => goes to the front
+    let at = 0;
+    for (let i = defIdx - 1; i >= 0; i--) {
+      const pos = out.indexOf(DEFAULT_COL_ORDER[i]);
+      if (pos !== -1) { at = pos + 1; break; }
+    }
+    out.splice(at, 0, key);
+  }
+  return out;
+}
 // Location-mode columns (D4) — the filtered agents grouped by their office location.
 const LOC_MODE_COLUMNS: Col[] = [
   { key: "location", label: "Location", sortBy: "location", defaultDir: "asc", render: (r) => <span className="font-semibold text-neutral-900">{na(r.location as string | null)}</span> },
@@ -359,7 +401,7 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
       if (raw) {
         const j = JSON.parse(raw);
         const savedOrder: string[] = Array.isArray(j.order) ? j.order.filter((k: string) => COL_BY_KEY[k]) : [];
-        setColOrder([...savedOrder, ...DEFAULT_COL_ORDER.filter((k) => !savedOrder.includes(k))]);
+        setColOrder(mergeColOrder(savedOrder));
         if (Array.isArray(j.hidden)) setHiddenCols(new Set(j.hidden.filter((k: string) => !LOCKED_COLS.includes(k))));
       }
     } catch {
