@@ -1,0 +1,26 @@
+-- 0113: a B-tree on agents.license_number, for the ingest dedup lookup.
+--
+-- The only index on this column was idx_agents_license_trgm, a GIN trigram index. That exists for
+-- fuzzy "%1234%" search and is the wrong shape for equality: the planner still picked it for
+-- `license_number = any($1)`, and paid for it.
+--
+-- The query is the ingest dedup path -- "which of these incoming agents do we already hold" --
+--     select id, full_name, license_number, lower(preferred_email) em,
+--            preferred_phone_digits ph, license_number k
+--       from agents where license_number = any($1::text[])
+-- and pg_stat_statements had it at 2,897 calls, 9,246 ms mean, 41,741 ms max: 7.4 HOURS of
+-- cumulative database time, on the hot path of the route the scraper calls continuously.
+--
+-- Measured on a realistic 500-license batch:
+--
+--     before   Bitmap Heap Scan on idx_agents_license_trgm   1,848 ms   185,410 buffers
+--     after    Index Scan on idx_agents_license_number           1.5 ms      502 buffers
+--
+-- ~1,200x faster, 370x fewer buffers. The trigram index is left in place -- it still serves the
+-- fuzzy license search in the UI, which a B-tree cannot answer.
+--
+-- Created CONCURRENTLY on production (1.16M rows, 26 MB) so the live agents table was never
+-- locked. CONCURRENTLY cannot run inside a transaction block, which is why this migration is a
+-- single bare statement.
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_agents_license_number
+  ON public.agents (license_number);
