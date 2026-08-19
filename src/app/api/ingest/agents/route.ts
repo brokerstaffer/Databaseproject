@@ -44,7 +44,12 @@ export async function POST(req: NextRequest) {
     getPool()
       .query(
         `select fn_refresh_saved_list_counts() where exists
-           (select 1 from saved_lists where cached_at is null or cached_at < now() - interval '10 minutes')`
+           -- 1 hour, not 10 minutes. This route is fed continuously by the scraper, so a
+           -- 10-minute window meant fn_refresh_saved_list_counts() -- which re-counts ALL 24 saved
+           -- lists, mean 9.8 s and up to the 120 s ceiling -- ran roughly six times an hour for
+           -- ever. Saved-list counts are a badge on a view, not something anyone reads to the
+           -- second. Same reasoning as 0112's location-options debounce.
+           (select 1 from saved_lists where cached_at is null or cached_at < now() - interval '1 hour')`
       )
       .catch(() => {});
     return NextResponse.json({ ok: true, source, received: rows.length, ...result });

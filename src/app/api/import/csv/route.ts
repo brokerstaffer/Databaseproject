@@ -63,7 +63,9 @@ export async function POST(req: NextRequest) {
     getPool()
       .query(
         `select fn_refresh_saved_list_counts() where exists
-           (select 1 from saved_lists where cached_at is null or cached_at < now() - interval '10 minutes')`
+           -- 1 hour, matching api/ingest/agents: re-counting all saved lists costs ~9.8 s and this
+           -- fires on every import batch, so a 10-minute window kept it running all day.
+           (select 1 from saved_lists where cached_at is null or cached_at < now() - interval '1 hour')`
       )
       .catch(() => {}); // B4: recount saved views, 10-min debounce
     return NextResponse.json({ ok: true, source, received: rows.length, linked, client: clientName, ...result });
