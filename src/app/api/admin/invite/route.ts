@@ -42,7 +42,10 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Email and role required" }, { status: 400 });
   }
 
-  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || "https://database-renaissance-production.up.railway.app";
+  // The fallback pointed at database-renaissance-production, a DIFFERENT project's Railway app.
+  // NEXT_PUBLIC_SITE_URL is set in production so the wrong value never shipped, but an invite sent
+  // from an environment missing that var would have mailed a link to someone else's deployment.
+  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || "https://web-production-34f4a.up.railway.app";
 
   let data: { user: { id: string } | null };
 
