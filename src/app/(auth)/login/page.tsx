@@ -42,7 +42,12 @@ export default function LoginPage() {
         access_token: accessToken,
         refresh_token: refreshToken,
       }).then(() => {
-        if (type === "invite" || type === "recovery") {
+        // recovery and invite are different journeys: someone resetting a password already has an
+        // account, and showing them "accept your invitation" is confusing. The session is set
+        // above, so /set-password works without the fragment coming along.
+        if (type === "recovery") {
+          window.location.href = "/set-password";
+        } else if (type === "invite") {
           window.location.href = "/accept-invite";
         } else {
           window.location.href = "/search";

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,7 +11,44 @@ export default function SetPasswordPage() {
   const [confirm, setConfirm] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [ready, setReady] = useState(false);
   const supabase = createClient();
+
+  // A recovery link arrives with the tokens in the URL FRAGMENT (#access_token=...&refresh_token=...).
+  // Nothing server-side can see a fragment, so the session has to be established here before
+  // updateUser() below has anything to update -- without this the page rendered fine and then
+  // failed with "Auth session missing" the moment you submitted.
+  //
+  // Mirrors the handler on the login page; the fragment is cleared afterwards so the tokens do not
+  // sit in the address bar or leak into history and Referer headers.
+  useEffect(() => {
+    const hash = window.location.hash;
+    if (!hash) {
+      setReady(true);
+      return;
+    }
+    const params = new URLSearchParams(hash.substring(1));
+    const hashError = params.get("error_description");
+    if (hashError) {
+      setError(hashError.replace(/\+/g, " "));
+      window.history.replaceState(null, "", window.location.pathname);
+      setReady(true);
+      return;
+    }
+    const access_token = params.get("access_token");
+    const refresh_token = params.get("refresh_token");
+    if (!access_token || !refresh_token) {
+      setReady(true);
+      return;
+    }
+    supabase.auth
+      .setSession({ access_token, refresh_token })
+      .then(({ error: e }) => {
+        if (e) setError(e.message);
+        window.history.replaceState(null, "", window.location.pathname);
+      })
+      .finally(() => setReady(true));
+  }, [supabase.auth]);
 
   async function handleSetPassword(e: React.FormEvent) {
     e.preventDefault();
@@ -77,7 +114,9 @@ export default function SetPasswordPage() {
             />
           </div>
           {error && <p className="text-sm text-destructive">{error}</p>}
-          <Button type="submit" className="w-full" disabled={loading}>
+          {/* !ready: the recovery session is still being established from the URL fragment.
+              Submitting before that resolves fails with "Auth session missing". */}
+          <Button type="submit" className="w-full" disabled={loading || !ready}>
             {loading ? "Setting password..." : "Set Password"}
           </Button>
         </form>
