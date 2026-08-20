@@ -246,7 +246,15 @@ function UsersTab({ currentUserId }: { currentUserId: string }) {
   }
   async function resetPw(userId: string) {
     const r = await fetch("/api/admin/reset-password", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ userId }) });
-    toast[r.ok ? "success" : "error"](r.ok ? "Reset link sent" : "Failed");
+    if (r.ok) {
+      toast.success("Reset link sent");
+      return;
+    }
+    // A bare "Failed" hid a 429 email-rate-limit for a whole debugging session: the button looked
+    // broken when Supabase was simply refusing to send another email for a while. The route sends
+    // the reason back; show it. user-table.tsx already did this.
+    const msg = await r.json().then((j) => j?.error).catch(() => null);
+    toast.error(msg || "Failed to send reset link", { duration: 9000 });
   }
   async function del(userId: string) {
     if (!confirm("Delete this user?")) return;

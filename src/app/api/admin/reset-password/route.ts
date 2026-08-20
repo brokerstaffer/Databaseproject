@@ -50,7 +50,16 @@ export async function POST(request: NextRequest) {
   });
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    // Supabase's own wording for a 429 here is "email rate limit exceeded", which reads like a
+    // bug rather than a quota. The built-in SMTP allows only a handful of auth emails per hour, so
+    // a few reset attempts in a row genuinely exhaust it. Say what to do about it, and pass the
+    // status through instead of flattening every failure to a 500.
+    const status = (error as { status?: number }).status ?? 500;
+    const message =
+      status === 429
+        ? "Supabase's email rate limit is exhausted — it allows only a few auth emails per hour. Wait an hour and retry, or set a custom SMTP provider in Supabase to raise the limit."
+        : error.message;
+    return NextResponse.json({ error: message }, { status });
   }
 
   await logAudit({
