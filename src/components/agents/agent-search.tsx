@@ -20,7 +20,7 @@ import { SavedViews } from "./saved-views";
 import { EditColumnsModal } from "./edit-columns";
 import { AgentProfileDialog } from "./agent-profile";
 import { AllFiltersDrawer } from "./all-filters-drawer";
-import { DEFAULT_FILTERS, SALES_VOLUME_BUCKETS, COUNT_BUCKETS, activeFilterCount, normalizeFilters } from "@/types/agent-filters";
+import { DEFAULT_FILTERS, SALES_VOLUME_BUCKETS, COUNT_BUCKETS, PLACE_COUNT_BUCKETS, activeFilterCount, normalizeFilters } from "@/types/agent-filters";
 import type { Filters } from "@/types/agent-filters";
 import { useNameSearch } from "@/lib/stores/name-search";
 
@@ -645,6 +645,15 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
                 type="button"
                 onClick={() => {
                   if (m === mode) return; // misclick on the active button must not wipe state
+                  // Agent Count means an office headcount in Office/Brand and a place's or MLS's
+                  // total in Location/MLS, and the two use disjoint bucket sets. Carrying a bucket
+                  // across that boundary would leave it APPLIED but unselectable in the control —
+                  // a filter you can feel and cannot see. Min/max carry over fine; only the
+                  // buckets are dropped, and only when crossing between the two groups.
+                  const placeGrain = (x: string) => x === "location" || x === "mls";
+                  if (placeGrain(m) !== placeGrain(mode) && filters.agentCount.buckets.length) {
+                    setFilters((f) => ({ ...f, agentCount: { ...f.agentCount, buckets: [] } }));
+                  }
                   setMode(m);
                   setPage(1);
                   setSelected(new Set());
@@ -727,12 +736,22 @@ export function AgentSearch({ initialQuery = "" }: { initialQuery?: string }) {
                   setPage(1);
                 }}
               />
-              {/* A19: named "Agent Count" in both Office and Brand views. It ranges on
-                  offices.agent_count either way — in Brand view that is applied per office
-                  BEFORE the offices are grouped into brands, so it selects brands by the
-                  size of their individual offices, not by their brand-wide headcount. */}
+              {/* A19: named "Agent Count" in both Office and Brand views, ranging on
+                  offices.agent_count. In Office view that is the office's own headcount; in Brand
+                  view 0088 moved it AFTER the grouping, so it selects brands by their brand-wide
+                  total (NextHome's 2,588 agents across 415 offices used to be hidden because no
+                  single office reached 100). */}
               <RangePopover label="Agent Count" suffix="#" buckets={COUNT_BUCKETS} value={{ side: "all", ...filters.agentCount }} onChange={(v) => setF("agentCount", { buckets: v.buckets, min: v.min, max: v.max })} />
             </>
+          )}
+          {/* 0114: the same control for Location and MLS, where it ranges on the place's or the
+              MLS's own agent total — "cities with 100+ agents" is 2,571 of 18,266. Different
+              buckets because these are orders of magnitude larger than an office (see
+              PLACE_COUNT_BUCKETS). Unlike every other filter in these two views this one is NOT an
+              agent predicate, so it filters the cached rollup directly rather than forcing the
+              4-second live aggregate. */}
+          {(mode === "location" || mode === "mls") && (
+            <RangePopover label="Agent Count" suffix="#" buckets={PLACE_COUNT_BUCKETS} value={{ side: "all", ...filters.agentCount }} onChange={(v) => setF("agentCount", { buckets: v.buckets, min: v.min, max: v.max })} />
           )}
           {/* office mode always ranges on total units — the List/Buy split is agent-only */}
           <RangePopover label="Closed units" hasSide={mode === "agent"} prefix="#" buckets={COUNT_BUCKETS} value={filters.closedUnits} onChange={(v) => setF("closedUnits", v)} />

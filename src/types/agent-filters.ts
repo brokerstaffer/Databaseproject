@@ -122,6 +122,18 @@ export const COUNT_BUCKETS: Bucket[] = [
   { key: "10-20", label: "10 - 20" },
   { key: "20+", label: "20+" },
 ];
+
+// Agent Count in the Location and MLS views. COUNT_BUCKETS above is sized for a single office's
+// headcount and is meaningless at this grain: every one of the 54 MLSs holds 562+ agents, so all
+// of them would land in "20+". Observed medians span four orders of magnitude -- city 3, county 7,
+// state 834, MLS 14,555 -- hence a log-ish scale. Must stay in step with fn_bucket_cond (0114).
+export const PLACE_COUNT_BUCKETS: Bucket[] = [
+  { key: "1-10", label: "1 - 10" },
+  { key: "10-100", label: "10 - 100" },
+  { key: "100-1K", label: "100 - 1K" },
+  { key: "1K-10K", label: "1K - 10K" },
+  { key: "10K+", label: "10K+" },
+];
 export const YEAR_BUCKETS: Bucket[] = [
   { key: "0-1yr", label: "0 - 1 yr" },
   { key: "1-3yrs", label: "1 - 3 yrs" },
@@ -199,7 +211,10 @@ export function activeFilterCount(f: Filters, mode: "agent" | "office" | "brand"
     rangeCount(f.closedUnits) +
     (f.orchClientIds.length ? 1 : 0);
   // Location + MLS are agent-grained (fn_agent_where), so saved views narrow them too (A21).
-  if (mode === "location" || mode === "mls") return shared + f.savedViews.include.length + f.savedViews.exclude.length;
+  // They also carry Agent Count (0114), which unlike every other filter here ranges on the OUTPUT
+  // row's agent total rather than on an agent column.
+  if (mode === "location" || mode === "mls")
+    return shared + rangeCount(f.agentCount) + f.savedViews.include.length + f.savedViews.exclude.length;
   // office + brand views also carry the MLS filter (office_mls), the per-office agent count,
   // and saved views (A21b — resolved at office grain by fn_office_where)
   if (mode === "brand" || mode === "office")
